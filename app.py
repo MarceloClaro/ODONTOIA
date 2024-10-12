@@ -1283,6 +1283,8 @@ def main():
     st.sidebar.image("eu.jpg", width=80)
    
     st.sidebar.write("""
+    Produzido pelo:
+    
     Projeto Geomaker + IA 
     
     https://doi.org/10.5281/zenodo.13910277
@@ -1299,8 +1301,7 @@ def main():
     # Dicionário de arquivos de áudio, com nomes amigáveis mapeando para o caminho do arquivo
     mp3_files = {
         "Áudio explicativo para Leigos": "leigo.mp3",
-        "Áudio explicativo para Geografos": "geografo.mp3",
-        "Áudio explicativo para estudos na saúde": "saude.mp3",
+
     }
     
     # Lista de arquivos MP3 para seleção
