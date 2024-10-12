@@ -617,11 +617,11 @@ def main():
     
     # Verificar se o arquivo de ícone existe antes de configurá-lo
     if os.path.exists(icon_path):
-        st.set_page_config(page_title="Geomaker +IA", page_icon=icon_path, layout="wide")
+        st.set_page_config(page_title="OdontoIA", page_icon=icon_path, layout="wide")
         logging.info(f"Ícone {icon_path} carregado com sucesso.")
     else:
         # Se o ícone não for encontrado, carrega sem favicon
-        st.set_page_config(page_title="Geomaker +IA", layout="wide")
+        st.set_page_config(page_title="OdontoIA", layout="wide")
         logging.warning(f"Ícone {icon_path} não encontrado, carregando sem favicon.")
     
     # Layout da página
@@ -637,7 +637,7 @@ def main():
     
     
   #___________________________________________________________
-    st.title("Classificação e Clustering de Imagens com Aprendizado Profundo")
+    st.title("Detecção de leções por Imagens com Aprendizado Profundo")
     st.write("Este aplicativo permite treinar um modelo de classificação de imagens e aplicar algoritmos de clustering para análise comparativa.")
     with st.expander("Transformações de Dados e Aumento de Dados no Treinamento de Redes Neurais"):
         st.write("""
@@ -753,8 +753,7 @@ def main():
             onde **W** e **b** são os pesos e o bias, respectivamente, que conectam a camada anterior às classes de saída. O resultado é passado pela função **softmax**, que converte os valores em probabilidades associadas a cada classe (Petrovska et al., 2020).
             """)
     
-            st.write("### Classificação Binária")
-            st.write("""
+            st.write("### Detecção de leções por       st.write("""
             Em tarefas de classificação binária, o modelo tem apenas duas classes possíveis, como **detecção de fraude** ou **diagnóstico de doenças** (positivo ou negativo). Nesse caso, a função de ativação final é geralmente a **sigmoide**, que retorna uma probabilidade entre 0 e 1 para cada entrada. Um limiar é então aplicado para decidir a classe final predita pelo modelo (Cheng, 2023).
             """)
     
