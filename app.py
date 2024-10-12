@@ -637,7 +637,7 @@ def main():
     
     
   #___________________________________________________________
-    st.title("Detecção de leções por Imagens com Aprendizado Profundo")
+    st.title("Detecção de lesões por Imagens com Aprendizado Profundo")
     st.write("Este aplicativo permite treinar um modelo de classificação de imagens e aplicar algoritmos de clustering para análise comparativa.")
     with st.expander("Transformações de Dados e Aumento de Dados no Treinamento de Redes Neurais"):
         st.write("""
