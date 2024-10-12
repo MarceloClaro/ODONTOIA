@@ -1281,7 +1281,7 @@ def main():
             """)
 
     use_weighted_loss = st.sidebar.checkbox("Usar Perda Ponderada para Classes Desbalanceadas", value=False)
-    st.sidebar.image("eu.ico", width=80)
+    st.sidebar.image("eu.jpg", width=80)
    
     st.sidebar.write("""
     Projeto Geomaker + IA 
