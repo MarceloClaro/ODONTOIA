@@ -1,0 +1,13 @@
+obre o conjunto de dados
+O acesso a um conjunto de dados de alta qualidade é crucial para o desenvolvimento de modelos de aprendizado profundo. Um novo conjunto de dados MOD compreende imagens de clínicas odontológicas em Okara, Punjab, Paquistão e outros locais (sites odontológicos, etc.). A coleção inclui rótulos de classe para sete doenças da boca e da cavidade oral, incluindo gangivoestomatite (gengiva), aftas (CaS), herpes labial (CoS), líquen plano oral (OLP), candidíase oral (OT), câncer de boca (MC) e câncer oral (OC). Antes, durante ou depois da sessão de fotos, ninguém revelou sua idade, sexo ou altura. Dentistas especialistas contribuíram para a rotulagem do conjunto de dados MOD.
+
+Devido ao número limitado de amostras fornecidas para cada rótulo de classe no conjunto de dados MOD, classificar doenças bucais e orais é difícil. Há 62 amostras de sapinhos orais, 78 amostras de aftas, 79 amostras de herpes labial, 61 amostras de gengivoestomatite, 93 amostras de líquen plano oral e 90 amostras de câncer bucal nesta coleta de dados. Este conjunto de dados pode ser usado para treinar e testar modelos de aprendizado profundo para diagnóstico e categorização automáticos de doenças orais.
+
+Por favor, cite o artigo "Classificação de doenças bucais e orais usando o método InceptionResNetV2". (Mouth and oral disease classification using InceptionResNetV2 method)
+
+Ferramentas e aplicações multimídia
+
+Link: https://link.springer.com/article/10.1007/s11042-023-16776-x#article-info 
+
+Javed Rashid, and Bilal Shabbir Qaisar. (2023). Mouth and Oral Diseases (MOD) [Data set]. Kaggle. https://doi.org/10.34740/KAGGLE/DSV/6510919
+
