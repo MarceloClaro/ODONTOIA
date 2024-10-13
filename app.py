@@ -575,7 +575,7 @@ def visualize_activations(model, image, class_names):
     activation_map = activation_map[0].cpu().numpy()
     
     # Redimensionar o mapa de ativação para coincidir com o tamanho da imagem original
-    activation_map_resized = cv2.resize(activation_map, (image.width, image.height))
+    activation_map_resized = cv2.resize(activation_map, (image.size[0], image.size[1]))
     
     # Normalizar o mapa de ativação para o intervalo [0, 1]
     activation_map_resized = (activation_map_resized - activation_map_resized.min()) / (activation_map_resized.max() - activation_map_resized.min())
