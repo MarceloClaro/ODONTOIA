@@ -1,91 +1,160 @@
-# Detecção de Lesões Bucais Utilizando Redes Neurais e Clustering
+# Detecção de Lesões Bucais Utilizando Redes Neurais Convolucionais e Clustering
 
-## Introdução
-Este projeto tem como objetivo a detecção de lesões bucais em imagens utilizando técnicas avançadas de aprendizado profundo (deep learning) e algoritmos de clustering. A aplicação usa modelos de redes neurais convolucionais (CNN) pré-treinados, como ResNet18, ResNet50, e DenseNet121, para a classificação de imagens bucais, além de aplicar técnicas de clustering para análise comparativa.
+## Visão Geral
+Este projeto utiliza redes neurais convolucionais (CNNs) pré-treinadas para a detecção de lesões bucais em imagens, complementado por técnicas de agrupamento (clustering) para análise de padrões latentes nos dados. Ele também implementa estratégias avançadas de visualização de ativação para destacar as regiões das imagens que mais influenciam as previsões do modelo, utilizando **Grad-CAM** (Gradient-weighted Class Activation Mapping). O objetivo principal é detectar lesões bucais de forma precisa e explicar os resultados de forma compreensível.
 
-O código está implementado em **PyTorch** e utiliza o **Streamlit** como interface interativa para visualização dos resultados. O projeto inclui transformações de dados, visualizações de métricas de performance, e análise de clusters utilizando **PCA**.
+## Objetivos
 
-## Funcionalidades Principais
-- **Classificação de Imagens**: Treinamento de modelos CNN pré-treinados para a detecção de lesões bucais.
-- **Clustering**: Aplicação de algoritmos de clustering (K-Means e Hierarchical Clustering) nos embeddings extraídos das imagens para análise de padrões.
-- **Visualização de Ativações**: Utilização de Grad-CAM para visualização das regiões ativadas pelo modelo na detecção de lesões.
-- **Suporte a Dados Desbalanceados**: Implementação de perda ponderada para tratar o desbalanceamento de classes no conjunto de dados.
-- **Transformações de Dados**: Aumento de dados com transformações como flip horizontal, rotação, recorte, entre outras.
+- **Classificação de Lesões Bucais**: Treinamento de CNNs pré-treinadas (ResNet18, ResNet50, DenseNet121) para identificar diferentes tipos de lesões bucais em imagens.
+- **Clustering**: Uso de técnicas de clustering (K-Means e Clustering Hierárquico) para encontrar padrões e agrupar imagens similares com base nas representações aprendidas pelo modelo.
+- **Grad-CAM**: Visualização das áreas de interesse nas imagens que ativam o modelo durante o processo de classificação.
+- **Perda Ponderada**: Implementação de perda ponderada para lidar com classes desbalanceadas no conjunto de dados, garantindo que classes minoritárias sejam adequadamente representadas.
+  
+## Requisitos Técnicos
 
-## Requisitos
-- Python 3.7+
-- PyTorch
-- Streamlit
-- Scikit-learn
-- Torchvision
-- Seaborn
-- Matplotlib
-- OpenCV
-- PIL (Python Imaging Library)
+- **Python**: 3.7+
+- **Framework**: PyTorch
+- **Interface Gráfica**: Streamlit
+- **Bibliotecas**:
+  - torchvision
+  - torchcam
+  - numpy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - OpenCV
+  - PIL (Python Imaging Library)
 
-## Instalação
-Para rodar este projeto localmente, siga os passos abaixo:
+## Instalação e Execução
 
-1. Clone este repositório:
+### Passos para instalação:
+1. **Clonar o repositório:**
    ```bash
    git clone https://github.com/seu-repositorio.git
    ```
    
-2. Navegue até o diretório do projeto:
+2. **Acessar o diretório do projeto:**
    ```bash
    cd detect-lesoes-bucais
    ```
 
-3. Crie um ambiente virtual e instale as dependências:
+3. **Criar ambiente virtual e instalar dependências:**
    ```bash
    python -m venv env
    source env/bin/activate  # No Windows: env\Scripts\activate
    pip install -r requirements.txt
    ```
 
-4. Rode a aplicação Streamlit:
+4. **Iniciar a aplicação:**
    ```bash
    streamlit run app.py
    ```
 
-## Uso
-1. **Carregar Imagens**: Faça o upload de um arquivo ZIP contendo as imagens bucais organizadas em subdiretórios para cada classe.
+## Arquitetura do Projeto
+
+O projeto é dividido em três componentes principais:
+
+1. **Treinamento Supervisionado**: Utiliza redes neurais convolucionais pré-treinadas em grandes conjuntos de dados (ex. ImageNet) e ajusta as últimas camadas para aprender as características de lesões bucais. A técnica de aumento de dados (data augmentation) é aplicada para gerar variações de imagens e melhorar a robustez do modelo.
+
+2. **Clustering para Análise Não-Supervisionada**: Após o treinamento supervisionado, o modelo extrai as representações intermediárias (features) de cada imagem. Essas features são, então, usadas como entrada para algoritmos de clustering (K-Means e Clustering Hierárquico) para identificar agrupamentos de imagens baseados em similaridades latentes.
+
+3. **Visualização das Ativações com Grad-CAM**: Esta técnica é utilizada para gerar mapas de calor que destacam as regiões da imagem que mais ativaram o modelo durante a classificação, proporcionando uma explicação visual das decisões do modelo.
+
+## Pipeline de Treinamento
+
+1. **Definição de Transformações de Dados**:
+   - **Aumento de Dados (Data Augmentation)**: Inclui transformações como flips horizontais, rotações, jitter de cor, e recortes aleatórios para aumentar a variabilidade das imagens de treino.
+   - **Normalização**: Aplicada para garantir que os valores de pixel estejam em uma escala adequada para o treinamento.
+
+2. **Carregamento do Dataset**:
+   - O dataset é carregado utilizando a classe `ImageFolder` do `torchvision`, que organiza as imagens em pastas nomeadas de acordo com as classes. Isso facilita a organização e o pré-processamento das imagens.
+
+3. **Treinamento do Modelo**:
+   - Modelos CNN pré-treinados (ResNet18, ResNet50, DenseNet121) são carregados e ajustados para a tarefa de classificação. As camadas finais são modificadas para o número de classes no dataset.
+   - **Perda Ponderada**: Para lidar com o desbalanceamento das classes, pesos são calculados com base na frequência das classes no conjunto de treino e aplicados à função de perda.
    
-2. **Configurações de Treinamento**: Selecione o modelo pré-treinado, ajuste o número de classes, as porcentagens de dados para treino e validação, e outros parâmetros na barra lateral.
+4. **Avaliação e Visualização**:
+   - **Métricas**: Matrizes de confusão, AUC-ROC e relatórios de classificação são gerados para avaliar o desempenho.
+   - **Ativações Grad-CAM**: Mapas de ativação são gerados para visualizar quais regiões das imagens mais influenciam as decisões do modelo.
 
-3. **Treinamento**: O modelo será treinado nas imagens carregadas. Durante o treinamento, métricas como perda e acurácia serão exibidas, e gráficos de desempenho serão gerados.
-
-4. **Clustering**: Após o treinamento, o modelo extrai os embeddings das imagens para aplicar algoritmos de clustering, ajudando na análise de padrões ocultos.
-
-5. **Visualizar Ativações**: Você pode visualizar as ativações da rede utilizando a técnica Grad-CAM para entender quais partes das imagens influenciaram a decisão do modelo.
-
-## Estrutura do Código
+## Principais Funções
 
 ### `train_model()`
-Treina um modelo de rede neural convolucional pré-treinado com dados bucais. Realiza a divisão do dataset em treino, validação e teste, e retorna o modelo treinado.
+Treina o modelo CNN selecionado nas imagens de lesões bucais. Este método divide o conjunto de dados em treino, validação e teste, utilizando o PyTorch para otimização do modelo.
+
+**Parâmetros**:
+- `data_dir`: Caminho para o diretório contendo o dataset de imagens.
+- `num_classes`: Número de classes a serem classificadas.
+- `model_name`: Nome do modelo pré-treinado a ser utilizado.
+- `fine_tune`: Se o ajuste fino (fine-tuning) será aplicado a todas as camadas ou apenas às finais.
+- `epochs`: Número de épocas de treinamento.
+- `learning_rate`: Taxa de aprendizado.
+- `batch_size`: Tamanho do lote para o DataLoader.
+- `use_weighted_loss`: Se a perda ponderada será usada para classes desbalanceadas.
 
 ### `visualize_data()`
-Exibe algumas imagens do dataset para inspeção visual.
+Exibe visualmente um subconjunto de imagens do dataset junto com suas respectivas classes, para uma inspeção visual rápida.
 
 ### `get_model()`
-Retorna o modelo CNN pré-treinado (ResNet ou DenseNet) com as camadas finais ajustadas para o número de classes definidas.
-
-### `compute_metrics()`
-Calcula e exibe métricas de performance como a matriz de confusão e o relatório de classificação.
+Retorna o modelo CNN pré-treinado ajustado para a tarefa de classificação de lesões bucais. Suporta ResNet18, ResNet50 e DenseNet121.
 
 ### `perform_clustering()`
-Aplica algoritmos de clustering como K-Means e Clustering Hierárquico nas características extraídas pelo modelo.
+Aplica os algoritmos de clustering **K-Means** e **Clustering Hierárquico** nas features extraídas pelo modelo, gerando rótulos de agrupamento para análise.
 
-### `visualize_clusters()`
-Exibe a visualização dos clusters gerados com redução de dimensionalidade usando PCA.
+### `compute_metrics()`
+Gera as métricas de avaliação como matriz de confusão, relatório de classificação e curva ROC. Essencial para validar o desempenho do modelo após o treinamento.
 
 ### `visualize_activations()`
-Utiliza Grad-CAM para visualizar as ativações da rede, destacando as áreas da imagem mais relevantes para a predição.
+Utiliza Grad-CAM para gerar um mapa de ativação destacando as áreas mais importantes de uma imagem na tomada de decisão do modelo.
+
+## Visualização de Dados
+
+### Grad-CAM
+O Grad-CAM é aplicado para gerar visualizações das áreas da imagem que mais ativaram a rede neural. Isso ajuda a explicar as decisões da rede e é essencial para entender como o modelo toma decisões, o que é particularmente importante em aplicações médicas.
+
+### Clustering
+Após o treinamento, os embeddings das imagens são usados em algoritmos de clustering (K-Means e Clustering Hierárquico). Isso permite uma análise adicional para verificar se há padrões latentes ou agrupamentos de lesões semelhantes.
+
+## Exemplos de Execução
+
+1. **Treinamento Supervisionado**:
+   Após carregar o dataset, selecione o modelo, defina os hiperparâmetros e inicie o treinamento.
+
+   ```python
+   model, classes = train_model(
+       data_dir='data/lesoes_bucais',
+       num_classes=5,
+       model_name='ResNet18',
+       fine_tune=True,
+       epochs=50,
+       learning_rate=0.001,
+       batch_size=32,
+       train_split=0.7,
+       valid_split=0.15,
+       use_weighted_loss=True,
+   )
+   ```
+
+2. **Clustering**:
+   Após o treinamento do modelo, utilize o clustering para identificar padrões de agrupamento.
+
+   ```python
+   features, labels = extract_features(dataset, model, batch_size=32)
+   hierarchical_labels, kmeans_labels = perform_clustering(features, num_clusters=5)
+   visualize_clusters(features, labels, hierarchical_labels, kmeans_labels, classes)
+   ```
+
+## Considerações Finais
+
+Este projeto fornece uma abordagem robusta para a detecção de lesões bucais utilizando aprendizado profundo. A combinação de CNNs pré-treinadas com técnicas de clustering e Grad-CAM oferece não só uma solução precisa, mas também interpretável, permitindo entender as decisões do modelo e os agrupamentos formados. A implementação de técnicas como **perda ponderada** garante que as classes minoritárias sejam adequadamente tratadas, aumentando a confiabilidade dos resultados.
 
 ## Referências
-- Huang, G., Liu, Z., Maaten, L., & Weinberger, K. (2017). Densely connected convolutional networks.
-- Shorten, C. & Khoshgoftaar, T. M. (2019). A survey on image data augmentation for deep learning.
-- Petrovska, B., Atanasova-Pacemska, T., Corizzo, R., Mignone, P., Lameski, P., & Zdravevski, E. (2020). Aerial scene classification through fine-tuning.
 
-Para mais detalhes e contato: 
-[Guiador - Marcelo Claro](https://www.instagram.com/marceloclaro.geomaker/)
+- Huang, G., Liu, Z., Maaten, L., & Weinberger, K. (2017). **Densely connected convolutional networks**. CVPR.
+- Buda, M., Maki, A., & Mazurowski, M. (2018). **A systematic study of the class imbalance problem in convolutional neural networks**. Neural Networks, 106, 249-259.
+- Shorten, C., & Khoshgoftaar, T. M. (2019). **A survey on image data augmentation for deep learning**. Journal of Big Data.
+  
+Para mais detalhes, entre em contato com o professor e orientador:
+[Guiador - Marcelo Claro](https://www.instagram.com/marceloclaro
+
+.geomaker/)
