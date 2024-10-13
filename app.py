@@ -1289,7 +1289,7 @@ def main():
     
     Projeto Geomaker + IA 
     
-    https://doi.org/10.5281/zenodo.13910277
+    https://doi.org/10.5281/zenodo.13925454
     - Professor: Marcelo Claro.
     Contatos: marceloclaro@gmail.com
     Whatsapp: (88)981587145
