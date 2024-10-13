@@ -20,12 +20,8 @@ from sklearn.preprocessing import label_binarize
 from sklearn.decomposition import PCA
 import streamlit as st
 import gc
-import cv2
 import logging
 import base64
-import torch.nn as nn
-import torchvision.models as models
-
 # Importações adicionais para Grad-CAM
 from torchcam.methods import SmoothGradCAMpp
 from torchvision.transforms.functional import normalize, resize, to_pil_image
@@ -547,15 +543,6 @@ def evaluate_image(model, image, classes):
 
 #________________________________________________
 
-
-# Função para capturar ativações da camada de interesse
-activations = {}
-
-def get_activation(name):
-    def hook(model, input, output):
-        activations[name] = output.detach()
-    return hook
-
 def visualize_activations(model, image, class_names):
     """
     Visualiza as ativações na imagem usando Grad-CAM.
@@ -567,46 +554,58 @@ def visualize_activations(model, image, class_names):
     if isinstance(model, models.ResNet):
         target_layer = model.layer4[-1]
     elif isinstance(model, models.DenseNet):
-        target_layer = model.features[-1]
+        target_layer = model.features.denseblock4.denselayer16
     else:
         st.error("Modelo não suportado para Grad-CAM.")
         return
     
-    # Registrar hook para capturar a saída da camada de interesse
-    target_layer.register_forward_hook(get_activation('target_layer'))
-
+    # Criar o objeto CAM usando torchcam
+    cam_extractor = SmoothGradCAMpp(model, target_layer=target_layer)
+    
     # Habilitar gradientes explicitamente
     with torch.set_grad_enabled(True):
         out = model(input_tensor)  # Faz a previsão
-        _, pred = torch.max(out, 1)  # Pega a classe predita
+        _, pred = torch.max(out, 1)  # Obtém a classe predita
         pred_class = pred.item()
-
-        # Gerar o mapa de ativação
-        activation_map = activations['target_layer'].squeeze().cpu().numpy()
-
-    # Redimensionar o mapa de ativação para coincidir exatamente com a imagem original
-    activation_map_resized = cv2.resize(activation_map[0], (image.size[0], image.size[1]))
-
+    
+    # Gerar o mapa de ativação
+    activation_map = cam_extractor(pred_class, out)
+    
+    # Obter o mapa de ativação da primeira imagem no lote
+    activation_map = activation_map[0].cpu().numpy()
+    
+    # Redimensionar o mapa de ativação para coincidir com o tamanho da imagem original
+    activation_map_resized = cv2.resize(activation_map, (image.width, image.height))
+    
     # Normalizar o mapa de ativação para o intervalo [0, 1]
     activation_map_resized = (activation_map_resized - activation_map_resized.min()) / (activation_map_resized.max() - activation_map_resized.min())
-
+    
+    # Converter a imagem para array NumPy
+    image_np = np.array(image)
+    
+    # Converter o mapa de ativação em uma imagem RGB
+    heatmap = cv2.applyColorMap(np.uint8(255 * activation_map_resized), cv2.COLORMAP_JET)
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    
+    # Sobrepor o mapa de ativação na imagem original
+    superimposed_img = heatmap * 0.4 + image_np * 0.6
+    superimposed_img = np.uint8(superimposed_img)
+    
     # Exibir a imagem original e o mapa de ativação sobreposto
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     
     # Imagem original
-    ax[0].imshow(image)
+    ax[0].imshow(image_np)
     ax[0].set_title('Imagem Original')
     ax[0].axis('off')
-
-    # Sobrepor o mapa de ativação redimensionado na imagem original
-    ax[1].imshow(image)
-    ax[1].imshow(activation_map_resized, cmap='jet', alpha=0.5)
+    
+    # Imagem com Grad-CAM
+    ax[1].imshow(superimposed_img)
     ax[1].set_title('Grad-CAM')
     ax[1].axis('off')
-
+    
     # Exibir as imagens com o Streamlit
     st.pyplot(fig)
-
 
 
 
