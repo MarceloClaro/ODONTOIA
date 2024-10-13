@@ -1,4 +1,4 @@
-# README - Detecção de Lesões Bucais Utilizando Redes Neurais e Clustering
+# Detecção de Lesões Bucais Utilizando Redes Neurais e Clustering
 
 ## Introdução
 Este projeto tem como objetivo a detecção de lesões bucais em imagens utilizando técnicas avançadas de aprendizado profundo (deep learning) e algoritmos de clustering. A aplicação usa modelos de redes neurais convolucionais (CNN) pré-treinados, como ResNet18, ResNet50, e DenseNet121, para a classificação de imagens bucais, além de aplicar técnicas de clustering para análise comparativa.
