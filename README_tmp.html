@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>README.md</title>
+    <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+    
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+html,footer,header{
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Custom MD PDF CSS
+ */
+html,footer,header{
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+
+ }
+body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+<link rel="stylesheet" href="file:///workspaces/ODONTOIA/R%3A%5C2.Travail%5C1.Enseignement%5CCours%5C_1.Outils%5C2.Developpement%5C1.SCSS%5Cmain.css" type="text/css"><link rel="stylesheet" href="file:///workspaces/ODONTOIA/D%3A%5Crdaros%5CCours%5C_1.Outils%5C2.Developpement%5C1.SCSS%5Cmain.css" type="text/css">
+</head>
+
+<body>
+    <h1 id="odontoia---detec%C3%A7%C3%A3o-de-les%C3%B5es-bucais-com-ia">ODONTO.IA - Detecção de Lesões Bucais com IA</h1>
+<p><a href="https://odontoia.streamlit.app/"><img src="https://img.shields.io/badge/Deployment-Live-brightgreen" alt="Deployment"></a></p>
+<h2 id="1-vis%C3%A3o-geral">1. Visão Geral</h2>
+<p>Este projeto utiliza Redes Neurais Convolucionais (CNNs) para classificar lesões bucais em imagens. A aplicação, construída com Streamlit e PyTorch, permite treinar, avaliar e visualizar o desempenho de diferentes arquiteturas de modelos. Além disso, integra um sistema de consulta acadêmica baseado em LLM para fornecer informações detalhadas e referências científicas sobre as doenças detectadas.</p>
+<h2 id="2-ambiente-de-desenvolvimento">2. Ambiente de Desenvolvimento</h2>
+<p>Siga os passos abaixo para configurar o ambiente de desenvolvimento local.</p>
+<h3 id="21-pr%C3%A9-requisitos">2.1. Pré-requisitos</h3>
+<ul>
+<li>Python 3.8+</li>
+<li><code>pip</code> e <code>venv</code></li>
+</ul>
+<h3 id="22-instala%C3%A7%C3%A3o">2.2. Instalação</h3>
+<ol>
+<li>
+<p><strong>Clone o repositório:</strong></p>
+<pre class="hljs"><code><div>git <span class="hljs-built_in">clone</span> https://github.com/seu-usuario/ODONTOIA.git
+<span class="hljs-built_in">cd</span> ODONTOIA
+</div></code></pre>
+</li>
+<li>
+<p><strong>Crie e ative um ambiente virtual:</strong></p>
+<pre class="hljs"><code><div>python -m venv venv
+<span class="hljs-built_in">source</span> venv/bin/activate  <span class="hljs-comment"># Linux/macOS</span>
+<span class="hljs-comment"># venv\Scripts\activate  # Windows</span>
+</div></code></pre>
+</li>
+<li>
+<p><strong>Instale as dependências:</strong><br>
+O arquivo <code>requirements.txt</code> contém todas as bibliotecas necessárias.</p>
+<pre class="hljs"><code><div>pip install -r requirements.txt
+</div></code></pre>
+</li>
+</ol>
+<h3 id="23-executando-a-aplica%C3%A7%C3%A3o">2.3. Executando a Aplicação</h3>
+<p>Para iniciar a interface do Streamlit, execute:</p>
+<pre class="hljs"><code><div>streamlit run app.py
+</div></code></pre>
+<p>A aplicação será aberta em seu navegador padrão.</p>
+<h2 id="3-estrutura-do-projeto">3. Estrutura do Projeto</h2>
+<p>O projeto está organizado nos seguintes arquivos principais:</p>
+<ul>
+<li><strong><code>app.py</code></strong>: Ponto de entrada da aplicação Streamlit. Controla a interface do usuário, orquestra o pipeline de treinamento e avaliação, e integra todos os outros módulos.</li>
+<li><strong><code>config.py</code></strong>: Arquivo central de configurações. Define hiperparâmetros, modelos disponíveis, otimizadores, transformações de dados e outras constantes globais. <strong>Este é o primeiro lugar para procurar ao ajustar um experimento.</strong></li>
+<li><strong><code>trainer.py</code></strong>: Contém a lógica principal de treinamento (<code>train_loop</code>), avaliação (<code>compute_metrics</code>), e análise de erros.</li>
+<li><strong><code>models.py</code></strong>: Define a função <code>get_model()</code> que carrega arquiteturas de CNN pré-treinadas (ResNet, DenseNet) e as adapta para a tarefa de classificação.</li>
+<li><strong><code>utils.py</code></strong>: Funções utilitárias para reprodutibilidade (<code>set_seed</code>), visualização de dados (<code>visualize_data</code>, <code>plot_metrics</code>) e outras tarefas de suporte.</li>
+<li><strong><code>llm_modal.py</code></strong>: Implementa o sistema de consulta acadêmica. Contém a classe <code>DentalDiseaseReference</code> que busca informações no PubMed e gera descrições detalhadas das doenças.</li>
+<li><strong><code>requirements.txt</code></strong>: Lista de todas as dependências do Python.</li>
+<li><strong><code>dataset/</code></strong>: Diretório padrão para os dados de imagem, embora um arquivo ZIP possa ser usado através da interface.</li>
+<li><strong><code>results/</code></strong>: Diretório onde os resultados dos experimentos (em formato JSON) são salvos.</li>
+</ul>
+<h2 id="4-pipeline-de-treinamento-e-avalia%C3%A7%C3%A3o">4. Pipeline de Treinamento e Avaliação</h2>
+<p>O fluxo de trabalho principal é gerenciado pelo <code>app.py</code> e pode ser resumido nos seguintes passos:</p>
+<ol>
+<li><strong>Configuração do Experimento</strong>: O usuário seleciona os hiperparâmetros na barra lateral do Streamlit (modelo, taxa de aprendizado, otimizador, etc.).</li>
+<li><strong>Carregamento de Dados</strong>: Os dados são carregados do diretório especificado em <code>config.DATASET_PATH</code> ou de um arquivo ZIP enviado pelo usuário.</li>
+<li><strong>Divisão dos Dados</strong>: O dataset é dividido em conjuntos de treino, validação e teste de forma estratificada.</li>
+<li><strong>Aumento de Dados (Data Augmentation)</strong>: As transformações definidas em <code>config.py</code> são aplicadas ao conjunto de treino.</li>
+<li><strong>Início do Treinamento</strong>: O <code>run_training_pipeline()</code> é chamado.
+<ul>
+<li>O modelo é instanciado via <code>models.get_model()</code>.</li>
+<li>O otimizador e o scheduler são criados via <code>trainer.get_optimizer()</code> e <code>trainer.get_scheduler()</code>.</li>
+<li>O loop de treinamento (<code>trainer.train_loop</code>) é executado, iterando através das épocas, calculando a perda, atualizando os pesos e validando o modelo. O Early Stopping é usado para evitar overfitting.</li>
+</ul>
+</li>
+<li><strong>Avaliação</strong>: Após o treinamento, o melhor modelo é avaliado no conjunto de teste usando <code>trainer.compute_metrics()</code>.</li>
+<li><strong>Salvamento dos Resultados</strong>: As configurações, o histórico de treinamento e as métricas finais são salvas em um arquivo JSON no diretório <code>results/</code>.</li>
+</ol>
+<h2 id="5-funcionalidades-avan%C3%A7adas">5. Funcionalidades Avançadas</h2>
+<h3 id="51-explica%C3%A7%C3%A3o-por-ia-xai">5.1. Explicação por IA (XAI)</h3>
+<p>A aplicação utiliza métodos como <code>Grad-CAM</code> para visualizar quais partes da imagem o modelo está &quot;olhando&quot; para fazer uma predição. Isso é implementado na função <code>visualize_activations()</code> em <code>app.py</code>.</p>
+<h3 id="52-an%C3%A1lise-de-clustering">5.2. Análise de Clustering</h3>
+<p>Após o treinamento, é possível extrair <em>features</em> (embeddings) das imagens usando a penúltima camada do modelo treinado. Esses embeddings são então usados para agrupar imagens semelhantes usando algoritmos como K-Means. Isso ajuda a descobrir padrões latentes nos dados.</p>
+<h3 id="53-m%C3%B3dulo-llm-acad%C3%AAmico">5.3. Módulo LLM Acadêmico</h3>
+<p>O <code>llm_modal.py</code> fornece um recurso de consulta que:</p>
+<ul>
+<li>Busca artigos científicos relevantes no PubMed usando a API E-utilities.</li>
+<li>Apresenta descrições clínicas, sintomas, causas e tratamentos para as doenças.</li>
+<li>Gera insights clínicos baseados em IA.</li>
+</ul>
+<h2 id="6-como-contribuir">6. Como Contribuir</h2>
+<p>Para adicionar novas funcionalidades ou corrigir bugs:</p>
+<ul>
+<li><strong>Novos Modelos</strong>: Adicione o nome do modelo à lista <code>AVAILABLE_MODELS</code> em <code>config.py</code> e atualize a função <code>get_model()</code> em <code>models.py</code> para lidar com a nova arquitetura.</li>
+<li><strong>Novos Otimizadores/Schedulers</strong>: Adicione o nome às listas <code>AVAILABLE_OPTIMIZERS</code> ou <code>AVAILABLE_SCHEDULERS</code> em <code>config.py</code> e atualize as funções <code>get_optimizer()</code>/<code>get_scheduler()</code> em <code>trainer.py</code>.</li>
+<li><strong>Estilo de Código</strong>: Siga o estilo de código existente (PEP 8) e adicione docstrings claras às novas funções.</li>
+</ul>
+<h2 id="7-contato">7. Contato</h2>
+<p>Para mais detalhes, entre em contato com o professor e orientador:<br>
+<a href="https://www.instagram.com/marceloclaro.geomaker/">Marcelo Claro</a></p>
+
+</body>
+
+</html>
