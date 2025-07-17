@@ -79,7 +79,7 @@ class DentalDiseaseReference:
         return self.disease_info.get(disease_key, {})
     
     def search_pubmed(self, query: str, max_results: int = 5) -> List[Dict]:
-        """Search PubMed for academic references"""
+        """Search PubMed for academic references with advanced metadata."""
         try:
             # PubMed E-utilities API
             base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
@@ -90,16 +90,16 @@ class DentalDiseaseReference:
                 "db": "pubmed",
                 "term": query,
                 "retmax": max_results,
-                "retmode": "xml"
+                "retmode": "xml",
+                "sort": "relevance"
             }
             
-            response = requests.get(search_url, params=search_params, timeout=10)
-            if response.status_code != 200:
-                return []
+            response = requests.get(search_url, params=search_params, timeout=15)
+            response.raise_for_status()
             
             # Parse XML to get PMIDs
             root = ET.fromstring(response.content)
-            pmids = [id_elem.text for id_elem in root.findall(".//Id")]
+            pmids = [id_elem.text for id_elem in root.findall(".//Id") if id_elem.text is not None]
             
             if not pmids:
                 return []
@@ -112,9 +112,8 @@ class DentalDiseaseReference:
                 "retmode": "xml"
             }
             
-            response = requests.get(fetch_url, params=fetch_params, timeout=10)
-            if response.status_code != 200:
-                return []
+            response = requests.get(fetch_url, params=fetch_params, timeout=15)
+            response.raise_for_status()
             
             # Parse article details
             articles = []
@@ -122,51 +121,66 @@ class DentalDiseaseReference:
             
             for article in root.findall(".//PubmedArticle"):
                 try:
-                    # Extract title
                     title_elem = article.find(".//ArticleTitle")
-                    title = title_elem.text if title_elem is not None else "No title available"
-                    
-                    # Extract authors
-                    authors = []
+                    title = title_elem.text if title_elem is not None and title_elem.text is not None else "No title available"
+
+                    authors_list = []
                     for author in article.findall(".//Author"):
-                        lastname = author.find(".//LastName")
-                        forename = author.find(".//ForeName")
-                        if lastname is not None and forename is not None:
-                            authors.append(f"{forename.text} {lastname.text}")
+                        lastname_elem = author.find(".//LastName")
+                        forename_elem = author.find(".//ForeName")
+                        if lastname_elem is not None and lastname_elem.text and forename_elem is not None and forename_elem.text:
+                            authors_list.append(f"{forename_elem.text} {lastname_elem.text}")
                     
-                    # Extract journal
+                    authors_str = ", ".join(authors_list[:3]) + (" et al." if len(authors_list) > 3 else "")
+
                     journal_elem = article.find(".//Title")
-                    journal = journal_elem.text if journal_elem is not None else "Unknown journal"
-                    
-                    # Extract year
+                    journal = journal_elem.text if journal_elem is not None and journal_elem.text is not None else "N/A"
+
                     year_elem = article.find(".//PubDate/Year")
-                    year = year_elem.text if year_elem is not None else "Unknown year"
-                    
-                    # Extract PMID
+                    year = year_elem.text if year_elem is not None and year_elem.text is not None else "N/A"
+
                     pmid_elem = article.find(".//PMID")
-                    pmid = pmid_elem.text if pmid_elem is not None else ""
-                    
-                    # Extract abstract
+                    pmid = pmid_elem.text if pmid_elem is not None and pmid_elem.text is not None else ""
+
                     abstract_elem = article.find(".//AbstractText")
-                    abstract = abstract_elem.text if abstract_elem is not None else "No abstract available"
-                    
+                    abstract = abstract_elem.text if abstract_elem is not None and abstract_elem.text is not None else "No abstract available"
+
+                    # Extract Publication Types
+                    pub_types = [pt.text for pt in article.findall(".//PublicationType") if pt.text]
+
+                    # Extract MeSH Terms
+                    mesh_terms = []
+                    for mesh in article.findall(".//MeshHeading"):
+                        descriptor = mesh.find(".//DescriptorName")
+                        if descriptor is not None and descriptor.text:
+                            mesh_terms.append(descriptor.text)
+
                     articles.append({
                         "title": title,
-                        "authors": ", ".join(authors[:3]) + (" et al." if len(authors) > 3 else ""),
+                        "authors": authors_str,
                         "journal": journal,
                         "year": year,
                         "pmid": pmid,
                         "abstract": abstract[:500] + "..." if len(abstract) > 500 else abstract,
-                        "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                        "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "#",
+                        "pub_types": pub_types,
+                        "mesh_terms": mesh_terms
                     })
                     
-                except Exception as e:
+                except Exception:
+                    # Skip article if there is any parsing error
                     continue
             
             return articles
             
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erro de conexão ao buscar no PubMed: {e}")
+            return []
+        except ET.ParseError as e:
+            st.error(f"Erro ao processar dados do PubMed: {e}")
+            return []
         except Exception as e:
-            st.error(f"Erro ao buscar referências no PubMed: {str(e)}")
+            st.error(f"Ocorreu um erro inesperado: {e}")
             return []
     
     def generate_llm_description(self, disease_key: str) -> str:
@@ -257,35 +271,48 @@ def show_disease_modal(disease_name: str, disease_key: str):
         with tab2:
             st.markdown("### 📖 Referências Acadêmicas do PubMed")
             
-            # Search terms for different diseases
+            # Advanced search terms for higher quality results
             search_terms = {
-                "gangivoestomatite": "gingivostomatitis oral inflammation",
-                "aftas": "aphthous stomatitis oral ulcers",
-                "herpes_labial": "herpes simplex labialis",
-                "liquen_plano_oral": "oral lichen planus",
-                "candidíase_oral": "oral candidiasis",
-                "cancer_boca": "oral cancer mouth carcinoma",
-                "cancer_oral": "oral carcinoma squamous cell"
+                "gangivoestomatite": '"Gingivostomatitis, Herpetic"[Mesh] OR (herpetic gingivostomatitis AND (review[ptyp] OR clinical trial[ptyp]))',
+                "aftas": '"Stomatitis, Aphthous"[Mesh] AND (review[ptyp] OR clinical trial[ptyp] OR meta-analysis[ptyp])',
+                "herpes_labial": '"Herpes Labialis"[Mesh] AND (review[ptyp] OR clinical trial[ptyp])',
+                "liquen_plano_oral": '"Lichen Planus, Oral"[Mesh] AND (review[ptyp] OR clinical trial[ptyp] OR guideline[ptyp])',
+                "candidíase_oral": '"Candidiasis, Oral"[Mesh] AND (drug therapy[subheading] OR diagnosis[subheading])',
+                "cancer_boca": '"Mouth Neoplasms"[Mesh] AND (diagnosis[subheading] OR therapy[subheading])',
+                "cancer_oral": '"Oral Squamous Cell Carcinoma"[Mesh] AND (pathology[subheading] OR therapy[subheading])'
             }
             
             search_term = search_terms.get(disease_key, disease_name)
             
-            with st.spinner("Buscando referências acadêmicas no PubMed..."):
+            with st.spinner("Buscando referências acadêmicas avançadas no PubMed..."):
                 articles = ref_system.search_pubmed(search_term)
             
             if articles:
-                st.success(f"Encontradas {len(articles)} referências relevantes:")
+                st.success(f"Encontradas {len(articles)} referências de alta relevância:")
                 
                 for i, article in enumerate(articles, 1):
                     with st.expander(f"📄 {i}. {article['title'][:100]}{'...' if len(article['title']) > 100 else ''}"):
                         st.markdown(f"**Autores:** {article['authors']}")
-                        st.markdown(f"**Revista:** {article['journal']}")
-                        st.markdown(f"**Ano:** {article['year']}")
-                        st.markdown(f"**PMID:** {article['pmid']}")
+                        st.markdown(f"**Revista:** {article['journal']} ({article['year']})")
+                        
+                        # Display Publication Types as chips (using markdown as a fallback for older streamlit versions)
+                        if article['pub_types']:
+                            st.write("**Tipo de Publicação:**")
+                            
+                            # Create a horizontal layout for the "chips"
+                            chip_html = "".join([f"<span style='background-color:#f0f2f6; border-radius:10px; padding: 5px 10px; margin: 0px 5px; display: inline-block;'>🔖 {pt}</span>" for pt in article['pub_types']])
+                            st.markdown(f"<div>{chip_html}</div>", unsafe_allow_html=True)
+
                         st.markdown(f"**Resumo:** {article['abstract']}")
-                        st.markdown(f"**Link:** [Ver no PubMed]({article['url']})")
+
+                        # Display MeSH Terms
+                        if article['mesh_terms']:
+                            st.markdown("**Termos MeSH:**")
+                            st.info(", ".join(article['mesh_terms']))
+
+                        st.markdown(f"**Link:** [Ver no PubMed (PMID: {article['pmid']})]({article['url']})")
             else:
-                st.warning("Não foi possível encontrar referências no momento. Tente novamente mais tarde.")
+                st.warning("Não foi possível encontrar referências com os critérios avançados. Verifique os termos de busca ou tente novamente.")
         
         with tab3:
             st.markdown("### 🤖 Análise Detalhada (LLM)")
@@ -326,6 +353,7 @@ def show_disease_modal(disease_name: str, disease_key: str):
 def get_disease_key(class_name: str) -> str:
     """Map class names to disease keys"""
     mapping = {
+        # English mappings
         "Gingivostomatitis": "gangivoestomatite",
         "Aphthous stomatitis": "aftas", 
         "Cold sore": "herpes_labial",
@@ -333,6 +361,13 @@ def get_disease_key(class_name: str) -> str:
         "Oral thrush": "candidíase_oral",
         "Mouth cancer": "cancer_boca",
         "Oral cancer": "cancer_oral",
+        "CaS": "aftas",
+        "CoS": "herpes_labial",
+        "Gum": "gangivoestomatite",
+        "MC": "cancer_boca",
+        "OC": "cancer_oral",
+        "OLP": "liquen_plano_oral",
+        "OT": "candidíase_oral",
         # Portuguese mappings
         "Gangivoestomatite": "gangivoestomatite",
         "Aftas": "aftas",
@@ -343,14 +378,15 @@ def get_disease_key(class_name: str) -> str:
         "Câncer oral": "cancer_oral"
     }
     
-    # Try exact match first
+    # Try exact match first (case-sensitive)
     if class_name in mapping:
         return mapping[class_name]
     
     # Try case-insensitive match
+    class_name_lower = class_name.lower()
     for key, value in mapping.items():
-        if key.lower() == class_name.lower():
+        if key.lower() == class_name_lower:
             return value
     
-    # Default fallback
+    # Default fallback if no match is found
     return "gangivoestomatite"
