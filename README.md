@@ -3,12 +3,54 @@
 ## Visão Geral
 Este projeto utiliza redes neurais convolucionais (CNNs) pré-treinadas para a detecção de lesões bucais em imagens, complementado por técnicas de agrupamento (clustering) para análise de padrões latentes nos dados. Ele também implementa estratégias avançadas de visualização de ativação para destacar as regiões das imagens que mais influenciam as previsões do modelo, utilizando **Grad-CAM** (Gradient-weighted Class Activation Mapping). O objetivo principal é detectar lesões bucais de forma precisa e explicar os resultados de forma compreensível.
 
+## 🆕 **Novo Recurso: Sistema de Consulta Acadêmica Inteligente com IA**
+
+### 🤖 Módulo LLM Modal Integrado
+O sistema agora inclui um módulo de inteligência artificial avançado que oferece:
+
+#### 📚 **Descrições Clínicas Detalhadas**
+- Informações médicas precisas sobre 7 doenças bucais do dataset MOD
+- Sintomas, causas e tratamentos baseados em literatura científica
+- Terminologia médica apropriada para profissionais da saúde
+
+#### 🔬 **Referências do PubMed**
+- Busca automática de artigos científicos relevantes
+- Integração direta com a base de dados PubMed/MEDLINE
+- Acesso a abstracts e links para artigos completos
+- Referências atualizadas para suporte à prática clínica
+
+#### 🎯 **Análise Inteligente**
+- Insights clínicos gerados por IA
+- Correlações entre achados visuais e manifestações clínicas
+- Suporte à tomada de decisão diagnóstica
+
+#### 📖 **Doenças Cobertas**
+1. **Gangivoestomatite** (Gingivostomatitis)
+2. **Aftas** (Aphthous Stomatitis)
+3. **Herpes Labial** (Herpes Simplex Labialis)
+4. **Líquen Plano Oral** (Oral Lichen Planus)
+5. **Candidíase Oral** (Oral Candidiasis)
+6. **Câncer de Boca** (Mouth Cancer)
+7. **Câncer Oral** (Oral Carcinoma)
+
+### 🚀 **Como Usar o Novo Recurso**
+1. **Durante o treinamento:** Explore informações sobre as classes de doenças no painel lateral
+2. **Após a predição:** Clique em "Ver Informações" para detalhes acadêmicos da doença identificada
+3. **Consulta independente:** Use o seletor no painel lateral para estudar qualquer doença
+
+### 🔧 **Implementação Técnica**
+- **Módulo**: `llm_modal.py` - Sistema completo de consulta acadêmica
+- **Integração**: API PubMed para busca de referências científicas
+- **Interface**: Modal interativo com 3 abas (Descrição, Referências, Análise LLM)
+- **Dados**: Base de conhecimento médico estruturada para cada doença
+
 ## Objetivos
 
 - **Classificação de Lesões Bucais**: Treinamento de CNNs pré-treinadas (ResNet18, ResNet50, DenseNet121) para identificar diferentes tipos de lesões bucais em imagens.
 - **Clustering**: Uso de técnicas de clustering (K-Means e Clustering Hierárquico) para encontrar padrões e agrupar imagens similares com base nas representações aprendidas pelo modelo.
 - **Grad-CAM**: Visualização das áreas de interesse nas imagens que ativam o modelo durante o processo de classificação.
 - **Perda Ponderada**: Implementação de perda ponderada para lidar com classes desbalanceadas no conjunto de dados, garantindo que classes minoritárias sejam adequadamente representadas.
+- **🆕 Consulta Acadêmica**: Sistema inteligente para consulta de informações médicas detalhadas e referências científicas.
   
 ## Requisitos Técnicos
 
@@ -24,6 +66,7 @@ Este projeto utiliza redes neurais convolucionais (CNNs) pré-treinadas para a d
   - scikit-learn
   - OpenCV
   - PIL (Python Imaging Library)
+  - requests (para integração PubMed)
 
 ## Instalação e Execução
 

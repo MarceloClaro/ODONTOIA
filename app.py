@@ -26,6 +26,8 @@ import base64
 from torchcam.methods import SmoothGradCAMpp
 from torchvision.transforms.functional import normalize, resize, to_pil_image
 import cv2
+# Importação do módulo LLM Modal
+from llm_modal import show_disease_modal, get_disease_key
 # Definir o dispositivo (CPU ou GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -638,6 +640,39 @@ def main():
   #___________________________________________________________
     st.title("Detecção de lesões por Imagens com Aprendizado Profundo")
     st.write("Este aplicativo permite treinar um modelo de classificação de imagens e aplicar algoritmos de clustering para análise comparativa.")
+    
+    # Nova seção sobre o modal LLM
+    with st.expander("🆕 **Novo Recurso: Consulta Acadêmica Inteligente com IA**", expanded=False):
+        st.markdown("""
+        ### 🤖 Sistema de Consulta Acadêmica Integrado
+        
+        Este sistema agora inclui um **módulo de inteligência artificial** que oferece:
+        
+        #### 📚 **Descrições Clínicas Detalhadas**
+        - Informações médicas precisas sobre cada doença bucal
+        - Sintomas, causas e tratamentos baseados em literatura científica
+        - Terminologia médica apropriada para profissionais da saúde
+        
+        #### 🔬 **Referências do PubMed**
+        - Busca automática de artigos científicos relevantes
+        - Integração direta com a base de dados PubMed/MEDLINE
+        - Acesso a abstracts e links para artigos completos
+        - Referências atualizadas para suporte à prática clínica
+        
+        #### 🎯 **Análise Inteligente**
+        - Insights clínicos gerados por IA
+        - Correlações entre achados visuais e manifestações clínicas
+        - Suporte à tomada de decisão diagnóstica
+        
+        #### 🚀 **Como Usar**
+        1. **Durante o treinamento:** Explore informações sobre as 7 classes de doenças bucais no painel lateral
+        2. **Após a predição:** Clique em "Ver Informações" para detalhes acadêmicos da doença identificada
+        3. **Consulta independente:** Use o seletor no painel lateral para estudar qualquer doença
+        
+        > ⚠️ **Importante:** Este recurso é destinado a fins educacionais e de suporte clínico. 
+        > Sempre consulte um profissional qualificado para diagnóstico e tratamento.
+        """)
+    
     with st.expander("Transformações de Dados e Aumento de Dados no Treinamento de Redes Neurais"):
         st.write("""
         As **transformações de dados** e o **aumento de dados** são técnicas essenciais no treinamento de redes neurais profundas, principalmente em tarefas de visão computacional. 
@@ -1281,6 +1316,38 @@ def main():
             """)
 
     use_weighted_loss = st.sidebar.checkbox("Usar Perda Ponderada para Classes Desbalanceadas", value=False)
+    
+    # Seção de Informações Acadêmicas das Doenças
+    st.sidebar.markdown("---")
+    st.sidebar.title("🎓 Informações Acadêmicas")
+    st.sidebar.markdown("Consulte informações detalhadas sobre doenças bucais com referências do PubMed:")
+    
+    # Lista de doenças disponíveis
+    diseases = {
+        "Gangivoestomatite": "gangivoestomatite",
+        "Aftas": "aftas", 
+        "Herpes Labial": "herpes_labial",
+        "Líquen Plano Oral": "liquen_plano_oral",
+        "Candidíase Oral": "candidíase_oral",
+        "Câncer de Boca": "cancer_boca",
+        "Câncer Oral": "cancer_oral"
+    }
+    
+    # Seletor de doença
+    selected_disease = st.sidebar.selectbox(
+        "Selecione uma doença para consultar:",
+        list(diseases.keys()),
+        help="Escolha uma doença para ver informações detalhadas e referências acadêmicas"
+    )
+    
+    # Botão para mostrar informações
+    if st.sidebar.button("📖 Consultar Informações Acadêmicas", type="primary"):
+        disease_key = diseases[selected_disease]
+        # Armazenar na sessão para mostrar no main content
+        st.session_state.show_disease_modal = True
+        st.session_state.selected_disease = selected_disease
+        st.session_state.disease_key = disease_key
+    
     st.sidebar.image("eu.jpg", width=80)
    
     st.sidebar.write("""
@@ -1364,8 +1431,16 @@ def main():
         st.sidebar.error("A soma dos splits de treinamento e validação deve ser menor ou igual a 0.95.")
 
     # Upload do arquivo ZIP
-    
     zip_file = st.file_uploader("Upload do arquivo ZIP com as imagens", type=["zip"])
+    
+    # Mostrar modal de informações acadêmicas se solicitado
+    if st.session_state.get('show_disease_modal', False):
+        show_disease_modal(
+            st.session_state.get('selected_disease', ''),
+            st.session_state.get('disease_key', '')
+        )
+        # Limpar o estado após mostrar
+        st.session_state.show_disease_modal = False
 
     if zip_file is not None and num_classes > 0 and train_split + valid_split <= 0.95:
         temp_dir = tempfile.mkdtemp()
@@ -1435,9 +1510,18 @@ def main():
                 class_name, confidence = evaluate_image(model, eval_image, classes)
                 st.write(f"**Classe Predita:** {class_name}")
                 st.write(f"**Confiança:** {confidence:.4f}")
-
-                # Visualizar ativações
-                visualize_activations(model, eval_image, classes)
+                
+                # Botão para ver informações acadêmicas da doença predita
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    if st.button(f"📖 Ver Informações sobre {class_name}", type="secondary"):
+                        disease_key = get_disease_key(class_name)
+                        show_disease_modal(class_name, disease_key)
+                
+                with col2:
+                    # Visualizar ativações
+                    if st.button("🔍 Visualizar Ativações (Grad-CAM)", type="secondary"):
+                        visualize_activations(model, eval_image, classes)
 
         # Limpar o diretório temporário
         shutil.rmtree(temp_dir)
