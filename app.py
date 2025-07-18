@@ -189,8 +189,10 @@ def evaluate_image(model: nn.Module, image: Image.Image, classes: List[str]) -> 
         return "Erro", 0.0
         
     image_tensor = image_tensor.unsqueeze(0).to(config.DEVICE)
-    with torch.no_grad():
+    with torch.set_grad_enabled(True):
         output = model(image_tensor)
+
+    with torch.no_grad():
         probabilities = torch.nn.functional.softmax(output, dim=1)
         confidence, predicted_idx = torch.max(probabilities, 1)
     
