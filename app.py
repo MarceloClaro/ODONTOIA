@@ -222,6 +222,7 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
              st.error("Não foi possível determinar a camada alvo para o Grad-CAM.")
              return
 
+    cam_extractor = None
     try:
         cam_extractor_class = {
             'SmoothGradCAMpp': SmoothGradCAMpp,
@@ -238,8 +239,7 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
         with torch.set_grad_enabled(True):
             out = model(input_tensor)
             pred_class = out.argmax().item()
-        activation_map = cam_extractor(pred_class, out)
-        cam_extractor.remove_hooks()
+            activation_map = cam_extractor(pred_class, out)
 
         result = to_pil_image(activation_map[0].squeeze(0).cpu(), mode='F')
         resized_map = result.resize(image.size, Image.Resampling.BICUBIC)
@@ -258,6 +258,9 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
         st.pyplot(fig)
     except Exception as e:
         st.error(f"Erro ao gerar Grad-CAM: {e}")
+    finally:
+        if cam_extractor:
+            cam_extractor.remove_hooks()
 
 def main():
     st.set_page_config(page_title="ODONTO.IA", layout="wide")
