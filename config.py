@@ -9,7 +9,7 @@ from torchvision import transforms
 # -------------------
 SEED = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_PATH = "/workspaces/ODONTOIA/dataset/Testing" # Default path
+DATASET_PATH = "/workspaces/ODONTOIA/dataset" # Default path
 
 # -------------------
 # Model Configurations
@@ -67,7 +67,7 @@ AUGMENTATION_PARAMS = {
 # -------------------
 # Optimizers and Schedulers
 # -------------------
-AVAILABLE_OPTIMIZERS = ['Adam', 'AdamW', 'SGD', 'Ranger', 'Lion', 'Sophia']
+AVAILABLE_OPTIMIZERS = ['Adam', 'AdamW', 'SGD', 'Ranger', 'Lion']
 AVAILABLE_SCHEDULERS = ['Nenhum', 'CosineAnnealingLR', 'OneCycleLR']
 
 # -------------------
