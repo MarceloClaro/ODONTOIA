@@ -9,7 +9,7 @@ from torchvision import transforms
 # -------------------
 SEED = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_PATH = "/workspaces/ODONTOIA/dataset" # Default path
+DATASET_PATH = "dataset" # Default path
 
 # -------------------
 # Model Configurations
