@@ -17,7 +17,7 @@ from typing import List, Dict, Any, cast, Tuple, Sized
 # Import advanced optimizers
 from lion_pytorch import Lion
 from pytorch_ranger import Ranger
-from sophia import SophiaG
+# from sophia_optimizer import SophiaG
 
 import config
 
@@ -88,8 +88,8 @@ def get_optimizer(model: nn.Module, optimizer_name: str, learning_rate: float, l
         return Ranger(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     elif optimizer_name == 'Lion':
         return Lion(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
-    elif optimizer_name == 'Sophia':
-        return SophiaG(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+    # elif optimizer_name == 'Sophia':
+    #     return SophiaG(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     else:
         st.warning(f"Otimizador '{optimizer_name}' não reconhecido. Usando Adam como padrão.")
         return optim.Adam(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
