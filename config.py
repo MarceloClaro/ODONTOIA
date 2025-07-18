@@ -9,7 +9,10 @@ from torchvision import transforms
 # -------------------
 SEED = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_PATH = "dataset" # Default path
+DATASET_PATH = "dataset"
+TRAIN_DIR = "dataset/Training"
+VALID_DIR = "dataset/Validation"
+TEST_DIR = "dataset/Testing"
 
 # -------------------
 # Model Configurations

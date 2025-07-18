@@ -51,53 +51,27 @@ class CustomDataset(Dataset):
 
 def run_training_pipeline(app_config):
     """Main function to run the training and evaluation pipeline."""
-    data_dir = app_config['data_dir']
-    
     try:
-        full_dataset = datasets.ImageFolder(root=data_dir)
-        classes = full_dataset.classes
+        # Apply augmentations based on selection
+        train_transform = config.train_transforms_augmented if app_config['augmentation'] != 'Nenhum' else config.train_transforms
+        
+        # Load datasets directly from the specified folders
+        train_dataset = datasets.ImageFolder(root=config.TRAIN_DIR, transform=train_transform)
+        valid_dataset = datasets.ImageFolder(root=config.VALID_DIR, transform=config.test_transforms)
+        test_dataset = datasets.ImageFolder(root=config.TEST_DIR, transform=config.test_transforms)
+
+        classes = train_dataset.classes
         num_classes = len(classes)
-        
-        st.subheader("Análise Inicial do Dataset")
-        visualize_data(full_dataset, classes)
-        
+
+        st.info(f"Dataset carregado: {len(train_dataset)} imagens de treino, "
+                f"{len(valid_dataset)} de validação e {len(test_dataset)} de teste.")
+
+        st.subheader("Análise Inicial do Dataset de Treino")
+        visualize_data(train_dataset, classes)
+
     except (FileNotFoundError, IndexError) as e:
-        st.error(f"Erro ao carregar dados de '{data_dir}': {e}. Verifique a estrutura.")
+        st.error(f"Erro ao carregar dados: {e}. Verifique se os diretórios 'Training', 'Validation' e 'Testing' existem em '{config.DATASET_PATH}'.")
         return None
-
-    # --- Data Splitting (Stratified) ---
-    from sklearn.model_selection import train_test_split
-    
-    dataset_size = len(full_dataset)
-    indices = list(range(dataset_size))
-    labels = [s[1] for s in full_dataset.samples]
-    
-    # Split into train+validation and test
-    train_val_indices, test_indices, _, _ = train_test_split(
-        indices, labels, test_size=1.0 - app_config['train_split'], random_state=config.SEED, stratify=labels
-    )
-    
-    # Split train+validation into train and validation
-    train_labels_stratify = [labels[i] for i in train_val_indices]
-    train_indices, valid_indices, _, _ = train_test_split(
-        train_val_indices, train_labels_stratify, test_size=0.2, random_state=config.SEED, stratify=train_labels_stratify # 20% of train_val for validation
-    )
-
-    train_subset = Subset(full_dataset, train_indices)
-    valid_subset = Subset(full_dataset, valid_indices)
-    test_subset = Subset(full_dataset, test_indices)
-    
-    st.info(f"Dataset dividido em: {len(train_subset)} imagens de treino, "
-            f"{len(valid_subset)} de validação e {len(test_subset)} de teste.")
-
-    # Apply augmentations based on selection
-    if app_config['augmentation'] == 'Nenhum':
-        train_dataset = CustomDataset(train_subset, transform=config.train_transforms)
-    else: # 'Padrão', 'Mixup', 'Cutmix' all use augmented transforms
-        train_dataset = CustomDataset(train_subset, transform=config.train_transforms_augmented)
-        
-    valid_dataset = CustomDataset(valid_subset, transform=config.test_transforms)
-    test_dataset = CustomDataset(test_subset, transform=config.test_transforms)
 
     g = torch.Generator().manual_seed(config.SEED)
     train_loader = DataLoader(train_dataset, batch_size=app_config['batch_size'], shuffle=True, worker_init_fn=seed_worker, generator=g)
@@ -114,9 +88,8 @@ def run_training_pipeline(app_config):
     # --- Loss Function ---
     criterion = nn.CrossEntropyLoss()
     if app_config['use_weighted_loss']:
-        all_labels_in_train = [s[1] for s in cast(datasets.ImageFolder, train_subset.dataset).samples]
-        train_labels = [all_labels_in_train[i] for i in train_subset.indices]
-        class_counts = np.bincount(train_labels, minlength=num_classes)
+        # Use train_dataset.targets which is available in ImageFolder
+        class_counts = np.bincount(train_dataset.targets, minlength=num_classes)
         class_weights = 1.0 / (class_counts + 1e-6)
         criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(config.DEVICE))
 
