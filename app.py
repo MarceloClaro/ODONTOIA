@@ -21,6 +21,7 @@ from typing import List, Tuple, Optional, Any, cast
 import json
 from datetime import datetime
 import torchvision
+import copy
 
 # ODONTO.IA imports
 import config
@@ -197,7 +198,9 @@ def evaluate_image(model: nn.Module, image: Image.Image, classes: List[str]) -> 
     return classes[predicted_item], confidence.item()
 
 def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str):
-    model.eval()
+    # Create a deep copy of the model to avoid modifying the original with hooks
+    model_copy = copy.deepcopy(model)
+    model_copy.eval()
     
     image_tensor = config.test_transforms(image)
     if not isinstance(image_tensor, torch.Tensor):
@@ -208,16 +211,16 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
     
     target_layer: Optional[nn.Module] = None
     # Heuristics to find the last convolutional layer
-    if hasattr(model, 'layer4') and isinstance(model.layer4, nn.Module): # ResNet
-        target_layer = model.layer4
-    elif hasattr(model, 'features') and isinstance(model.features, nn.Module): # DenseNet
-        target_layer = model.features
+    if hasattr(model_copy, 'layer4') and isinstance(model_copy.layer4, nn.Module): # ResNet
+        target_layer = model_copy.layer4
+    elif hasattr(model_copy, 'features') and isinstance(model_copy.features, nn.Module): # DenseNet
+        target_layer = model_copy.features
     
     if target_layer is None:
         st.warning("Não foi possível encontrar uma camada alvo adequada para XAI. A visualização pode não ser ideal.")
         # Fallback to the last child module if it's a Sequential block
-        if len(list(model.children())) > 0 and isinstance(list(model.children())[-1], nn.Sequential):
-             target_layer = list(model.children())[-1][-1] # type: ignore
+        if len(list(model_copy.children())) > 0 and isinstance(list(model_copy.children())[-1], nn.Sequential):
+             target_layer = list(model_copy.children())[-1][-1] # type: ignore
         if target_layer is None:
              st.error("Não foi possível determinar a camada alvo para o Grad-CAM.")
              return
@@ -234,10 +237,10 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
             st.error(f"Método XAI '{xai_method}' não suportado.")
             return
             
-        cam_extractor = cam_extractor_class(model, target_layer=target_layer)
+        cam_extractor = cam_extractor_class(model_copy, target_layer=target_layer)
 
         with torch.set_grad_enabled(True):
-            out = model(input_tensor)
+            out = model_copy(input_tensor)
             pred_class = out.argmax().item()
             activation_map = cam_extractor(pred_class, out)
 
