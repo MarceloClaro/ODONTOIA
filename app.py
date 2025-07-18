@@ -264,8 +264,9 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
     except Exception as e:
         st.error(f"Erro ao gerar Grad-CAM: {e}")
     finally:
-        if cam_extractor:
-            cam_extractor.remove_hooks()
+        # The new torchcam API handles hooks automatically.
+        # If cam_extractor was created, it will be garbage collected.
+        pass
 
 def main():
     st.set_page_config(page_title="ODONTO.IA", layout="wide")
