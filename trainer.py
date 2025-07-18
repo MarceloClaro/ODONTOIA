@@ -17,7 +17,7 @@ from typing import List, Dict, Any, cast, Tuple, Sized
 # Import advanced optimizers
 from lion_pytorch import Lion
 from pytorch_ranger import Ranger
-from sophia.sophia import SophiaG
+from sophia import SophiaG
 
 import config
 
