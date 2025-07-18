@@ -1,0 +1,25 @@
+[
+    {
+        "type": "heading",
+        "name": "# Olá, Fractalic!",
+        "level": 1,
+        "params": null,
+        "content": "# Olá, Fractalic!\n\nEste é um arquivo de teste para demonstrar o uso do `fractalic`.\n\n- Item 1\n- Item 2",
+        "id": "ola-fractalic",
+        "indent": 4,
+        "source_path": null,
+        "source_block_id": null,
+        "target_path": null,
+        "target_block_id": null,
+        "key": "a5b27fed",
+        "prev": null,
+        "next": null,
+        "enabled": true,
+        "role": "user",
+        "response_content": null,
+        "created_by": null,
+        "created_by_file": "exemplo.md",
+        "response_messages": null,
+        "is_system": false
+    }
+]
