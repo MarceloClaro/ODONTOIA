@@ -41,7 +41,17 @@ def visualize_data(dataset: ImageFolder, classes: List[str]):
         idx = np.random.randint(len(dataset))
         image, label = dataset[idx]
         ax = axes[i]
-        ax.imshow(np.array(image))
+        # Converte para numpy e transpõe de (C, H, W) para (H, W, C)
+        image_np = image.numpy()
+        image_display = np.transpose(image_np, (1, 2, 0))
+        
+        # Desnormaliza para visualização correta (usando valores padrão do ImageNet)
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        image_display = std * image_display + mean
+        image_display = np.clip(image_display, 0, 1)
+        
+        ax.imshow(image_display)
         ax.set_title(classes[label])
         ax.axis('off')
     st.pyplot(fig)
