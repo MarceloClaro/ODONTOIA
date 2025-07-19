@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 st.set_page_config(page_title="ODONTO.IA", layout="wide")
-
+from groq_llm import interpretar_predicao, gerar_prognostico
 
 import zipfile
 import shutil
@@ -516,12 +516,24 @@ def main():
             if eval_image_file:
                 image = Image.open(eval_image_file).convert("RGB")
                 st.image(image, caption='Imagem para avaliação', use_container_width=True)
-                
+    
                 class_name, confidence = evaluate_image(model, image, classes)
                 st.metric(label="Classe Predita", value=class_name, delta=f"Confiança: {confidence:.2%}")
-                
+    
+                # --- Integração Groq LLM ---
+                from groq_llm import interpretar_predicao, gerar_prognostico
+    
+                with st.spinner("Consultando IA Groq para interpretação clínica..."):
+                    interpretacao = interpretar_predicao(class_name)
+                    st.write("**Interpretação clínica (IA Groq):**", interpretacao)
+    
+                with st.spinner("Consultando IA Groq para prognóstico..."):
+                    prognostico = gerar_prognostico(class_name)
+                    st.write("**Prognóstico clínico (IA Groq):**", prognostico)
+                # --- Fim Integração Groq LLM ---
+    
                 visualize_activations(model, image, xai_method)
-                
+    
                 disease_key = get_disease_key(class_name)
                 show_disease_modal(class_name, disease_key)
         else:
