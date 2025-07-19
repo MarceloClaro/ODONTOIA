@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 st.set_page_config(page_title="ODONTO.IA", layout="wide")
-from groq_llm import interpretar_predicao, gerar_prognostico
+from groq_llm import interpretar_predicao, gerar_prognostico, consulta_groq
 
 import zipfile
 import shutil
@@ -444,7 +444,6 @@ def main():
                 st.image(image, caption='Imagem para avaliação', use_container_width=True)
                 class_name, confidence = evaluate_image(model, image, classes)
                 st.metric(label="Classe Predita", value=class_name, delta=f"Confiança: {confidence:.2%}")
-                from groq_llm import interpretar_predicao, gerar_prognostico
                 with st.spinner("Consultando IA Groq para interpretação clínica..."):
                     interpretacao = interpretar_predicao(class_name)
                     st.write("**Interpretação clínica (IA Groq):**", interpretacao)
@@ -517,7 +516,6 @@ def main():
                 f"fundamentos estatísticos (como função de perda, otimização, regularização), e explique passo a passo. "
                 f"Inclua exemplos numéricos ou cálculos simples para ilustrar."
             )
-            from groq_llm import consulta_groq
             with st.spinner("Gerando análise técnica detalhada via IA Groq..."):
                 analise_tecnica = consulta_groq(prompt, temperature=0.3, max_tokens=2048)
                 st.markdown(analise_tecnica)
