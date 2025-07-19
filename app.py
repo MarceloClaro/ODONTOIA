@@ -413,14 +413,7 @@ def main():
         augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES, key="augmentation")
 
     # --- Main App Body ---
-        # --- Main App Body ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Treinamento", 
-        "Análise de Clustering", 
-        "Avaliação de Imagem", 
-        "Comparação de Experimentos", 
-        "Análise Técnica da Arquitetura"
-    ])
+    tab1, tab2, tab3, tab4 = st.tabs(["Treinamento", "Análise de Clustering", "Avaliação de Imagem", "Comparação de Experimentos"])
 
     with tab1:
         st.header("1. Fonte de Dados e Início")
@@ -445,6 +438,7 @@ def main():
                     temp_dir = tempfile.mkdtemp()
                     temp_dir_to_clean = temp_dir
                     with zipfile.ZipFile(zip_file, 'r') as z: z.extractall(temp_dir)
+                    # Handle cases where the zip extracts to a subdirectory
                     extracted_folders = [f for f in os.listdir(temp_dir) if os.path.isdir(os.path.join(temp_dir, f))]
                     if len(extracted_folders) == 1 and extracted_folders[0] != '__MACOSX':
                          data_dir = os.path.join(temp_dir, extracted_folders[0])
@@ -460,6 +454,8 @@ def main():
                         st.session_state.model, st.session_state.classes, st.session_state.history, st.session_state.metrics = train_result
                         st.session_state.training_done = True
                         st.session_state.data_dir = data_dir
+                        
+                        # Save results
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         results_filename = f"results/experiment_{app_config['model_name']}_{timestamp}.json"
                         results_data = {
@@ -469,6 +465,7 @@ def main():
                         }
                         with open(results_filename, 'w') as f:
                             json.dump(results_data, f, indent=4)
+                        
                         st.success(f"Experimento concluído! Resultados salvos em `{results_filename}`")
                         st.balloons()
                 else:
@@ -496,8 +493,12 @@ def main():
                         hierarchical_labels, kmeans_labels = perform_clustering(features, num_clusters)
                         evaluate_clustering(labels, hierarchical_labels, "Hierárquico")
                         evaluate_clustering(labels, kmeans_labels, "K-Means")
+                        
+                        # Chamar a nova função de visualização interativa
                         from utils import plot_interactive_embeddings
                         plot_interactive_embeddings(features, labels, paths, classes)
+                        
+                        # Manter a visualização antiga como uma opção ou alternativa
                         with st.expander("Visualização Estática de Clusters (PCA)"):
                             visualize_clusters(features, labels, hierarchical_labels, kmeans_labels, classes)
             else:
@@ -515,16 +516,24 @@ def main():
             if eval_image_file:
                 image = Image.open(eval_image_file).convert("RGB")
                 st.image(image, caption='Imagem para avaliação', use_container_width=True)
+    
                 class_name, confidence = evaluate_image(model, image, classes)
                 st.metric(label="Classe Predita", value=class_name, delta=f"Confiança: {confidence:.2%}")
+    
+                # --- Integração Groq LLM ---
                 from groq_llm import interpretar_predicao, gerar_prognostico
+    
                 with st.spinner("Consultando IA Groq para interpretação clínica..."):
                     interpretacao = interpretar_predicao(class_name)
                     st.write("**Interpretação clínica (IA Groq):**", interpretacao)
+    
                 with st.spinner("Consultando IA Groq para prognóstico..."):
                     prognostico = gerar_prognostico(class_name)
                     st.write("**Prognóstico clínico (IA Groq):**", prognostico)
+                # --- Fim Integração Groq LLM ---
+    
                 visualize_activations(model, image, xai_method)
+    
                 disease_key = get_disease_key(class_name)
                 show_disease_modal(class_name, disease_key)
         else:
@@ -532,72 +541,29 @@ def main():
 
     with tab4:
         st.header("4. Comparação de Experimentos")
+        
         results_files = [f for f in os.listdir('results') if f.endswith('.json')]
+        
         if not results_files:
             st.info("Nenhum resultado de experimento encontrado. Execute um treinamento para começar.")
         else:
             selected_files = st.multiselect("Selecione os experimentos para comparar:", results_files)
+
             if st.button("🗑️ Apagar Todos os Resultados", help="Clique para remover todos os arquivos .json da pasta de resultados."):
                 try:
                     for file in results_files:
                         os.remove(os.path.join('results', file))
                     st.success("Todos os resultados dos experimentos foram apagados.")
+                    # Força o rerender para atualizar a lista de arquivos
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao apagar os arquivos: {e}")
+            
             if selected_files:
                 all_results = []
                 for file in selected_files:
                     with open(os.path.join('results', file), 'r') as f:
                         all_results.append(json.load(f))
-                st.subheader("Resumo das Configurações e Métricas")
-                summary_data = []
-                for res in all_results:
-                    conf = res['config']
-                    met = res['metrics']
-                    summary_data.append({
-                        "Modelo": conf.get('model_name', 'N/A'),
-                        "Otimizador": conf.get('optimizer', 'N/A'),
-                        "LR": conf.get('learning_rate', 'N/A'),
-                        "Augmentation": conf.get('augmentation', 'N/A'),
-                        "F1-Score (Macro)": met.get('macro avg', {}).get('f1-score', 0),
-                        "Acurácia": met.get('accuracy', 0)
-                    })
-                st.dataframe(pd.DataFrame(summary_data))
-                st.subheader("Curvas de Aprendizagem Comparadas")
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-                for res in all_results:
-                    label = res['config'].get('model_name', 'exp') + "_" + res['config'].get('optimizer', '')
-                    hist = res['history']
-                    epochs = range(1, len(hist['train_loss']) + 1)
-                    ax1.plot(epochs, hist['val_loss'], 'o-', label=f"Val Loss ({label})")
-                    ax2.plot(epochs, hist['val_acc'], 'o-', label=f"Val Acc ({label})")
-                ax1.set_title('Perda de Validação')
-                ax1.set_xlabel('Épocas'); ax1.set_ylabel('Perda'); ax1.grid(True); ax1.legend()
-                ax2.set_title('Acurácia de Validação')
-                ax2.set_xlabel('Épocas'); ax2.set_ylabel('Acurácia'); ax2.grid(True); ax2.legend()
-                st.pyplot(fig)
-
-    with tab5:
-        st.header("Análise Técnica da Arquitetura do Modelo")
-        if st.session_state.training_done and st.session_state.model:
-            model_name_used = st.session_state.model.__class__.__name__
-            prompt = (
-                f"Explique de maneira técnica, rigorosa e didática o funcionamento, "
-                f"a metodologia científica, os fundamentos matemáticos e os cálculos envolvidos "
-                f"na arquitetura de rede neural {model_name_used} utilizada para classificação de imagens de lesões bucais. "
-                f"Divida a resposta em tópicos: objetivo, funcionamento, equações matemáticas relevantes, "
-                f"fundamentos estatísticos (como função de perda, otimização, regularização), e explique passo a passo. "
-                f"Inclua exemplos numéricos ou cálculos simples para ilustrar."
-            )
-            from groq_llm import consulta_groq
-            with st.spinner("Gerando análise técnica detalhada via IA Groq..."):
-                analise_tecnica = consulta_groq(prompt, temperature=0.3, max_tokens=2048)
-                st.markdown(analise_tecnica)
-        else:
-            st.info("Treine um modelo antes para visualizar a análise técnica da arquitetura.")
-            
-
                 
                 # --- Tabela de Comparação ---
                 st.subheader("Resumo das Configurações e Métricas")
