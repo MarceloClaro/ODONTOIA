@@ -1,4 +1,4 @@
-FOI PROVOCADO PELO NOVO CODIGO app.py ANTES ERA import os
+import os
 import streamlit as st
 st.set_page_config(page_title="ODONTO.IA", layout="wide")
 from groq_llm import interpretar_predicao, gerar_prognostico
