@@ -23,6 +23,7 @@ AVAILABLE_MODELS = ['ResNet18', 'ResNet50', 'DenseNet121']
 # Training Hyperparameters
 # -------------------
 TRAINING_PARAMS = {
+    'image_size': 224,
     'epochs': 50,
     'batch_size': 32,
     'learning_rate': 1e-4,

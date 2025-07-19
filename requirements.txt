@@ -62,6 +62,7 @@ MarkupSafe==3.0.2
 matplotlib==3.10.3
 matplotlib-inline==0.1.7
 mistune==3.1.3
+monai[pillow]
 mpmath==1.3.0
 narwhals==1.47.0
 nbclient==0.10.2

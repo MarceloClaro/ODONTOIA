@@ -1,4 +1,8 @@
 import os
+import streamlit as st
+st.set_page_config(page_title="ODONTO.IA", layout="wide")
+
+
 import zipfile
 import shutil
 import tempfile
@@ -23,10 +27,28 @@ from datetime import datetime
 import torchvision
 import copy
 
+# MONAI imports
+from monai.data.dataloader import DataLoader
+from monai.data.image_dataset import ImageDataset
+from monai.data.dataset import Dataset as MONAIDataset
+from monai.transforms.compose import Compose
+from monai.transforms.io.dictionary import LoadImaged
+from monai.transforms.utility.dictionary import EnsureChannelFirstd, EnsureTyped, Lambdad
+from monai.transforms.intensity.dictionary import ScaleIntensityd
+from monai.transforms.spatial.dictionary import (
+    RandFlipd,
+    RandRotate90d,
+    RandZoomd,
+    Resized,
+)
+from monai.transforms.post.array import Activations, AsDiscrete
+
+
 # ODONTO.IA imports
 import config
-from utils import (set_seed, seed_worker, visualize_data, 
-                   plot_class_distribution, plot_metrics, visualize_augmented_data)
+from utils import (set_seed, seed_worker, visualize_data,
+                   plot_class_distribution, plot_metrics, visualize_augmented_data,
+                   display_model_architecture, display_environment_info, interpret_results)
 from models import get_model
 from trainer import train_loop, compute_metrics, error_analysis, get_optimizer, get_scheduler
 from llm_modal import show_disease_modal, get_disease_key
@@ -53,25 +75,95 @@ class CustomDataset(Dataset):
 def run_training_pipeline(app_config):
     """Main function to run the training and evaluation pipeline."""
     try:
-        # Apply augmentations based on selection
-        train_transform = config.train_transforms_augmented if app_config['augmentation'] != 'Nenhum' else config.train_transforms
+        # --- MONAI Data Pipeline ---
         
-        # Load datasets directly from the specified folders
-        train_dataset = datasets.ImageFolder(root=config.TRAIN_DIR, transform=train_transform)
-        valid_dataset = datasets.ImageFolder(root=config.VALID_DIR, transform=config.test_transforms)
-        test_dataset = datasets.ImageFolder(root=config.TEST_DIR, transform=config.test_transforms)
+        # Define transforms
+        train_transforms_list = [
+            LoadImaged(keys=["image"]),
+            EnsureChannelFirstd(keys=["image"]),
+            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            ScaleIntensityd(keys=["image"]),
+            Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
+            EnsureTyped(keys=["image"], dtype=torch.float32),
+        ]
+        
+        # Add augmentations if selected
+        if app_config['augmentation'] != 'Nenhum':
+            train_transforms_list.extend([
+                RandFlipd(keys=["image"], prob=0.5, spatial_axis=0),
+                RandRotate90d(keys=["image"], prob=0.5, max_k=3),
+                RandZoomd(keys=["image"], prob=0.5, min_zoom=0.9, max_zoom=1.1),
+            ])
+            
+        train_transform = Compose(train_transforms_list)
 
-        classes = train_dataset.classes
+        val_transform = Compose([
+            LoadImaged(keys=["image"]),
+            EnsureChannelFirstd(keys=["image"]),
+            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            ScaleIntensityd(keys=["image"]),
+            Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
+            EnsureTyped(keys=["image"], dtype=torch.float32),
+        ])
+
+        # Discover classes and create file lists
+        train_files, train_labels, classes = [], [], sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
+        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
+        for target_class in classes:
+            class_dir = os.path.join(config.TRAIN_DIR, target_class)
+            for fname in os.listdir(class_dir):
+                train_files.append(os.path.join(class_dir, fname))
+                train_labels.append(class_to_idx[target_class])
+
+        valid_files, valid_labels = [], []
+        for target_class in classes:
+            class_dir = os.path.join(config.VALID_DIR, target_class)
+            if os.path.isdir(class_dir):
+                for fname in os.listdir(class_dir):
+                    valid_files.append(os.path.join(class_dir, fname))
+                    valid_labels.append(class_to_idx[target_class])
+
+        test_files, test_labels = [], []
+        for target_class in classes:
+            class_dir = os.path.join(config.TEST_DIR, target_class)
+            if os.path.isdir(class_dir):
+                for fname in os.listdir(class_dir):
+                    test_files.append(os.path.join(class_dir, fname))
+                    test_labels.append(class_to_idx[target_class])
+
         num_classes = len(classes)
 
-        st.info(f"Dataset carregado: {len(train_dataset)} imagens de treino, "
+        # Create MONAI Datasets
+        train_data = [{"image": img, "label": lab} for img, lab in zip(train_files, train_labels)]
+        valid_data = [{"image": img, "label": lab} for img, lab in zip(valid_files, valid_labels)]
+        test_data = [{"image": img, "label": lab} for img, lab in zip(test_files, test_labels)]
+
+        train_dataset = MONAIDataset(data=train_data, transform=train_transform)
+        valid_dataset = MONAIDataset(data=valid_data, transform=val_transform)
+        test_dataset = MONAIDataset(data=test_data, transform=val_transform)
+
+
+        st.info(f"Dataset carregado com MONAI: {len(train_dataset)} imagens de treino, "
                 f"{len(valid_dataset)} de validação e {len(test_dataset)} de teste.")
+        
+        # --- DEBUG LOGS ---
+        st.write(f"DEBUG: Lendo dados de: TRAIN='{config.TRAIN_DIR}', VALID='{config.VALID_DIR}', TEST='{config.TEST_DIR}'")
+        st.write(f"DEBUG: Classes encontradas ({num_classes}): {classes}")
+        st.write(f"DEBUG: Mapeamento de classes: {class_to_idx}")
+        st.write(f"DEBUG: Total de arquivos de treino: {len(train_files)}, Validação: {len(valid_files)}, Teste: {len(test_files)}")
+        # --- FIM DEBUG LOGS ---
 
-        st.subheader("Análise Inicial do Dataset de Treino")
-        visualize_data(train_dataset, classes)
+        # Visualize a sample from the MONAI dataset
+        check_ds = MONAIDataset(data=train_data, transform=train_transform)
+        check_loader = DataLoader(check_ds, batch_size=1)
+        sample = next(iter(check_loader))
+        st.info(f"Shape do tensor de imagem do MONAI: {sample['image'].shape}")
+        st.info(f"Tipo de dado do tensor: {sample['image'].dtype}")
+        st.info(f"Estrutura do item do Dataset (chaves): {sample.keys()}")
 
-    except (FileNotFoundError, IndexError) as e:
-        st.error(f"Erro ao carregar dados: {e}. Verifique se os diretórios 'Training', 'Validation' e 'Testing' existem em '{config.DATASET_PATH}'.")
+
+    except Exception as e:
+        st.error(f"Erro ao carregar dados com MONAI: {e}. Verifique os caminhos e as permissões.")
         return None
 
     g = torch.Generator().manual_seed(config.SEED)
@@ -80,8 +172,9 @@ def run_training_pipeline(app_config):
     test_loader = DataLoader(test_dataset, batch_size=app_config['batch_size'])
 
     # --- Visualizations ---
-    st.subheader("Balanceamento de Classes (Conjunto de Treino)")
-    plot_class_distribution(train_dataset, classes)
+    st.subheader("Análise do Conjunto de Dados")
+    plot_class_distribution(train_dataset, classes, title="Distribuição de Classes (Treino)")
+    plot_class_distribution(valid_dataset, classes, title="Distribuição de Classes (Validação)")
 
     if app_config['augmentation'] != 'Nenhum':
         visualize_augmented_data(train_loader)
@@ -89,16 +182,16 @@ def run_training_pipeline(app_config):
     # --- Loss Function ---
     criterion = nn.CrossEntropyLoss()
     if app_config['use_weighted_loss']:
-        # Use train_dataset.targets which is available in ImageFolder
-        class_counts = np.bincount(train_dataset.targets, minlength=num_classes)
+        class_counts = np.bincount(train_labels, minlength=num_classes)
         class_weights = 1.0 / (class_counts + 1e-6)
         criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(config.DEVICE))
 
     # --- Model, Optimizer, Scheduler ---
     model = get_model(app_config['model_name'], num_classes, fine_tune=app_config['fine_tune'])
-    if model is None: 
+    if model is None:
         st.error("Falha ao carregar o modelo.")
         return None
+    display_model_architecture(model, app_config['model_name'])
     model.to(config.DEVICE)
 
     optimizer = get_optimizer(model, app_config['optimizer'], app_config['learning_rate'], app_config['l2_lambda'])
@@ -119,13 +212,14 @@ def run_training_pipeline(app_config):
 
     st.write("**Avaliação no Conjunto de Teste**")
     metrics_report = compute_metrics(model, test_loader, classes)
+    interpret_results(metrics_report, history)
     st.write("**Análise de Erros**")
     error_analysis(model, test_loader, classes)
     
     gc.collect()
     return model, classes, history, metrics_report
 
-def extract_features(dataset: Dataset, model: nn.Module, batch_size: int) -> Tuple[np.ndarray, np.ndarray]:
+def extract_features(dataset: datasets.ImageFolder, model: nn.Module, batch_size: int) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     if isinstance(model, nn.DataParallel):
         model = model.module # Handle DataParallel wrapper
         
@@ -138,18 +232,27 @@ def extract_features(dataset: Dataset, model: nn.Module, batch_size: int) -> Tup
         feature_extractor_layers.extend(list(model.children())[:-1])
     else:
         st.error("Arquitetura de modelo não suportada para extração de features.")
-        return np.array([]), np.array([])
+        return np.array([]), np.array([]), []
 
     feature_extractor = nn.Sequential(*feature_extractor_layers)
     feature_extractor.eval()
-    dataloader = DataLoader(dataset, batch_size=batch_size)
-    features, labels = [], []
+    # Use shuffle=False to keep image paths and labels aligned
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    features, labels, paths = [], [], []
     with torch.no_grad():
-        for inputs, lbls in dataloader:
+        # We need to get the paths from the dataset samples
+        for i, (inputs, lbls) in enumerate(dataloader):
             outputs = feature_extractor(inputs.to(config.DEVICE))
             features.append(outputs.cpu().numpy().reshape(len(outputs), -1))
             labels.extend(lbls.numpy())
-    return np.concatenate(features), np.array(labels)
+            
+            # Get the file paths for the current batch
+            start_index = i * batch_size
+            end_index = start_index + len(inputs)
+            batch_paths = [dataset.samples[j][0] for j in range(start_index, end_index)]
+            paths.extend(batch_paths)
+            
+    return np.concatenate(features), np.array(labels), paths
 
 def perform_clustering(features: np.ndarray, num_clusters: int) -> Tuple[np.ndarray, np.ndarray]:
     hierarchical = AgglomerativeClustering(n_clusters=num_clusters).fit_predict(features)
@@ -318,6 +421,8 @@ def main():
         zip_file = st.file_uploader("Upload do arquivo ZIP com imagens", type=["zip"], key="zip_uploader")
         
         if st.button("🚀 Iniciar Treinamento"):
+            with st.spinner("Configurando o ambiente e iniciando o treinamento..."):
+                display_environment_info()
             app_config = {
                 'model_name': model_name, 'fine_tune': fine_tune, 'epochs': epochs,
                 'batch_size': batch_size, 'optimizer': optimizer, 'learning_rate': learning_rate,
@@ -381,14 +486,21 @@ def main():
                     classes = cast(List[str], st.session_state.classes)
 
                     full_dataset = datasets.ImageFolder(root=data_dir, transform=config.test_transforms)
-                    features, labels = extract_features(full_dataset, model, batch_size)
+                    features, labels, paths = extract_features(full_dataset, model, batch_size)
                     
                     if features.size > 0:
                         num_clusters = len(classes)
                         hierarchical_labels, kmeans_labels = perform_clustering(features, num_clusters)
                         evaluate_clustering(labels, hierarchical_labels, "Hierárquico")
                         evaluate_clustering(labels, kmeans_labels, "K-Means")
-                        visualize_clusters(features, labels, hierarchical_labels, kmeans_labels, classes)
+                        
+                        # Chamar a nova função de visualização interativa
+                        from utils import plot_interactive_embeddings
+                        plot_interactive_embeddings(features, labels, paths, classes)
+                        
+                        # Manter a visualização antiga como uma opção ou alternativa
+                        with st.expander("Visualização Estática de Clusters (PCA)"):
+                            visualize_clusters(features, labels, hierarchical_labels, kmeans_labels, classes)
             else:
                 st.warning("Treine um modelo primeiro. Os resultados do treinamento são necessários para esta análise.")
 
@@ -473,6 +585,7 @@ def main():
                 ax2.set_title('Acurácia de Validação')
                 ax2.set_xlabel('Épocas'); ax2.set_ylabel('Acurácia'); ax2.grid(True); ax2.legend()
                 st.pyplot(fig)
+
 
 if __name__ == "__main__":
     main()

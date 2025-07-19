@@ -1,0 +1,17 @@
+# Fractalic Settings Configuration
+# Copy this file to settings.toml and customize with your API keys and settings
+
+# Default LLM provider - set to your preferred model
+defaultProvider = "gemini"
+
+[settings.gemini]
+model = "gemini-2.5-pro"
+apiKey = "AIzaSyDVc5QnyhxvwoY1gqniVZ2jNCzeOEf4Nnc"
+
+
+[runtime]
+enableOperationsVisibility = true
+
+[mcp]
+mcpServers = ["http://127.0.0.1:5859"]
+

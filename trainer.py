@@ -3,7 +3,7 @@ Main training loop and evaluation logic for the ODONTO.IA project.
 """
 import torch
 from torch import nn, optim
-from torch.utils.data import DataLoader
+from monai.data.dataloader import DataLoader
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -38,7 +38,9 @@ def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0):
     return mixed_x, y_a, y_b, lam
 
 def mixup_criterion(criterion: nn.Module, pred: torch.Tensor, y_a: torch.Tensor, y_b: torch.Tensor, lam: float):
-    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+    # Convert lam to a tensor on the correct device to avoid dtype errors
+    lam_t = torch.tensor(lam, device=pred.device, dtype=pred.dtype)
+    return lam_t * criterion(pred, y_a) + (1 - lam_t) * criterion(pred, y_b)
 
 def cutmix_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0):
     '''Returns mixed inputs, pairs of targets, and lambda'''
@@ -123,15 +125,10 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    train_dataset = train_loader.dataset
-    valid_dataset = valid_loader.dataset
+    # The MONAI Dataset is wrapped, so we can get its length.
+    train_dataset_size = len(cast(Sized, train_loader.dataset))
+    valid_dataset_size = len(cast(Sized, valid_loader.dataset))
 
-    if not (hasattr(train_dataset, '__len__') and hasattr(valid_dataset, '__len__')):
-        st.error("O dataset de treino ou validação não tem um método __len__ definido.")
-        return {"weights": model.state_dict(), "history": history}
-
-    train_dataset_size = len(cast(Sized, train_dataset))
-    valid_dataset_size = len(cast(Sized, valid_dataset))
 
     for epoch in range(epochs):
         model.train()
@@ -139,11 +136,12 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
         corrects_train = 0
         
         loop = tqdm(train_loader, desc=f"Época {epoch+1}/{epochs}", leave=False)
-        for inputs, labels in loop:
-            inputs, labels = inputs.to(config.DEVICE), labels.to(config.DEVICE)
+        for batch_data in loop:
+            inputs, labels = batch_data["image"].to(config.DEVICE), batch_data["label"].to(config.DEVICE)
             
             optimizer.zero_grad()
 
+            # Augmentation logic remains the same, as it operates on tensors
             if augmentation_technique in ['Mixup', 'Cutmix'] and model.training:
                 if augmentation_technique == 'Mixup':
                     aug_inputs, targets_a, targets_b, lam = mixup_data(inputs, labels, config.AUGMENTATION_PARAMS['mixup_alpha'])
@@ -152,16 +150,15 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
                 
                 outputs = model(aug_inputs)
                 loss = mixup_criterion(criterion, outputs, targets_a, targets_b, lam)
-                # Accuracy for augmented data is tricky, so we calculate it on original-like data
                 with torch.no_grad():
                     plain_outputs = model(inputs)
                     _, preds = torch.max(plain_outputs, 1)
-
             else: # Padrão
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 _, preds = torch.max(outputs, 1)
 
+            # Certifique-se de que a retropropagação ocorra antes de qualquer conversão
             loss.backward()
             optimizer.step()
             
@@ -179,8 +176,8 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
         val_loss = 0.0
         corrects_val = 0
         with torch.no_grad():
-            for inputs, labels in valid_loader:
-                inputs, labels = inputs.to(config.DEVICE), labels.to(config.DEVICE)
+            for batch_data in valid_loader:
+                inputs, labels = batch_data["image"].to(config.DEVICE), batch_data["label"].to(config.DEVICE)
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item() * inputs.size(0)
@@ -223,8 +220,8 @@ def compute_metrics(model: nn.Module, dataloader: DataLoader, classes: List[str]
     all_preds = []
     all_labels = []
     with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(config.DEVICE), labels.to(config.DEVICE)
+        for batch_data in dataloader:
+            inputs, labels = batch_data["image"].to(config.DEVICE), batch_data["label"].to(config.DEVICE)
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             all_preds.extend(preds.cpu().numpy())
@@ -249,17 +246,18 @@ def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str])
     model.eval()
     misclassified = []
     with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(config.DEVICE), labels.to(config.DEVICE)
+        for batch_data in dataloader:
+            inputs, labels = batch_data["image"].to(config.DEVICE), batch_data["label"].to(config.DEVICE)
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             
             for i in range(len(preds)):
                 if preds[i] != labels[i]:
-                    # Denormalize and convert to PIL for display
+                    # The input from MONAI is already scaled, so we just need to handle channel format
                     img_tensor = inputs[i].cpu()
-                    img = np.transpose(img_tensor.numpy(), (1, 2, 0))
-                    img = (img * np.array([0.229, 0.224, 0.225])) + np.array([0.485, 0.456, 0.406]) # Standard denormalization
+                    # MONAI LoadImaged provides channel-first, so permute to channel-last for display
+                    img = img_tensor.permute(1, 2, 0).numpy()
+                    # The ScaleIntensityd normalizes to [0,1], so no need for standard denormalization
                     img = np.clip(img, 0, 1)
                     
                     misclassified.append({
