@@ -242,7 +242,7 @@ def plot_interactive_embeddings(features: np.ndarray, labels: np.ndarray, image_
 
     # Redução de dimensionalidade com t-SNE
     with st.spinner("Calculando a redução de dimensionalidade com t-SNE..."):
-        tsne = TSNE(n_components=2, perplexity=30, n_iter=300, random_state=config.SEED)
+        tsne = TSNE(n_components=2, perplexity=30, max_iter=300, random_state=config.SEED)
         reduced_features = tsne.fit_transform(features)
 
     # Função para codificar imagens para o hover
