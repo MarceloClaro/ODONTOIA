@@ -1,0 +1,12 @@
+{
+    "operation": "@run",
+    "operation_src": null,
+    "filename": "exemplo.md",
+    "ctx_file": "exemplo.ctx",
+    "md_commit_hash": "2cec27e0d1d1dfd07d9554491c57f86fb8b1c44d",
+    "ctx_commit_hash": "32d1d853702a5d5b61782d582da2147ad443c0a4",
+    "trc_file": "exemplo.trc",
+    "trc_commit_hash": "32d1d853702a5d5b61782d582da2147ad443c0a4",
+    "children": [],
+    "node_python": "<core.operations.call_tree.CallTreeNode object at 0x7071f0f903b0>"
+}
