@@ -2,7 +2,7 @@ import requests
 import os
 
 # Carregue sua chave da API de forma segura
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "COLOQUE_SUA_CHAVE_AQUI")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama3-70b-8192"  # ou outro modelo disponível na Groq
