@@ -6,22 +6,20 @@ import streamlit as st
 def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout_rate: float = 0.5):
     """
     Carrega um modelo pré-treinado e o adapta para a tarefa de classificação.
-
-    Args:
-        model_name (str): Nome do modelo a ser carregado (ex: 'resnet50', 'densenet121').
-        num_classes (int): Número de classes de saída.
-        fine_tune (bool): Se True, descongela todos os pesos para fine-tuning.
-        dropout_rate (float): A taxa de dropout a ser usada na camada de classificação.
-
-    Returns:
-        torch.nn.Module: O modelo adaptado.
     """
     try:
+        model = None
         # Seleciona o modelo com base no nome
-        if model_name == 'resnet50':
+        if model_name == 'resnet18': # <-- ADICIONADO
+            model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+            num_ftrs = model.fc.in_features
+            model.fc = nn.Sequential(
+                nn.Dropout(p=dropout_rate),
+                nn.Linear(num_ftrs, num_classes)
+            )
+        elif model_name == 'resnet50':
             model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
             num_ftrs = model.fc.in_features
-            # Substitui a camada de classificação
             model.fc = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(num_ftrs, num_classes)
@@ -29,7 +27,6 @@ def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout
         elif model_name == 'densenet121':
             model = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT)
             num_ftrs = model.classifier.in_features
-            # Substitui a camada de classificação
             model.classifier = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(num_ftrs, num_classes)
@@ -37,7 +34,6 @@ def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout
         elif model_name == 'efficientnet_b0':
             model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
             num_ftrs = model.classifier[1].in_features
-            # Substitui a camada de classificação
             model.classifier = nn.Sequential(
                 nn.Dropout(p=dropout_rate, inplace=True),
                 nn.Linear(num_ftrs, num_classes),
@@ -47,18 +43,15 @@ def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout
             return None
 
         # Congela ou descongela os pesos com base no parâmetro fine_tune
-        if not fine_tune:
-            for param in model.parameters():
-                param.requires_grad = False
-            # Garante que os parâmetros da nova camada de classificação sejam treináveis
-            if hasattr(model, 'fc'):
-                for param in model.fc.parameters():
-                    param.requires_grad = True
-            elif hasattr(model, 'classifier'):
-                for param in model.classifier.parameters():
-                    param.requires_grad = True
-        else:
-            for param in model.parameters():
+        for param in model.parameters():
+            param.requires_grad = fine_tune
+
+        # Garante que os parâmetros da nova camada de classificação sejam sempre treináveis
+        if hasattr(model, 'fc'):
+            for param in model.fc.parameters():
+                param.requires_grad = True
+        elif hasattr(model, 'classifier'):
+            for param in model.classifier.parameters():
                 param.requires_grad = True
 
         return model
