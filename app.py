@@ -163,7 +163,12 @@ def run_training_pipeline(app_config):
         class_weights = 1.0 / (class_counts + 1e-6)
         criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(config.DEVICE))
 
-    model = get_model(app_config['model_name'], num_classes, fine_tune=app_config['fine_tune'])
+    model = get_model(
+        app_config['model_name'], 
+        num_classes, 
+        fine_tune=app_config['fine_tune'], 
+        dropout_rate=app_config['dropout_rate']  # Passando dropout para o modelo
+    )
     if model is None:
         st.error("Falha ao carregar o modelo.")
         return None
@@ -173,8 +178,11 @@ def run_training_pipeline(app_config):
     optimizer = get_optimizer(model, app_config['optimizer'], app_config['learning_rate'], app_config['l2_lambda'])
     scheduler = get_scheduler(optimizer, app_config['scheduler'], app_config['epochs'], len(train_loader))
 
-    train_results = train_loop(model, train_loader, valid_loader, criterion, optimizer, scheduler, 
-                                app_config['epochs'], app_config['patience'], app_config['augmentation'])
+    train_results = train_loop(
+        model, train_loader, valid_loader, criterion, optimizer, scheduler, 
+        app_config['epochs'], app_config['patience'], app_config['augmentation'],
+        l1_lambda=app_config['l1_lambda']  # Passando L1 para o loop de treino
+    )
     
     best_model_wts = train_results['weights']
     history = train_results['history']
@@ -334,17 +342,23 @@ def main():
         st.header("Modelo")
         model_name = st.selectbox("Arquitetura:", config.AVAILABLE_MODELS, key="model_name")
         fine_tune = st.checkbox("Fine-Tuning Completo", True, key="fine_tune")
+        
         st.header("Treinamento")
         epochs = st.slider("Épocas:", 1, 500, config.TRAINING_PARAMS['epochs'], key="epochs")
         batch_size = st.select_slider("Tamanho do Lote:", [4, 8, 16, 32, 64], config.TRAINING_PARAMS['batch_size'], key="batch_size")
+        
         st.header("Otimização")
         optimizer = st.selectbox("Otimizador:", config.AVAILABLE_OPTIMIZERS, key="optimizer")
         learning_rate = st.select_slider("Taxa de Aprendizagem:", [1e-2, 1e-3, 1e-4, 1e-5], config.TRAINING_PARAMS['learning_rate'], key="lr")
         scheduler = st.selectbox("Agendador de LR:", config.AVAILABLE_SCHEDULERS, key="scheduler")
+        
         st.header("Regularização")
-        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2")
+        l1_lambda = st.number_input("Regularização L1 (Lasso):", 0.0, 0.1, 0.0, 0.001, key="l1", format="%.4f")
+        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2", format="%.4f")
+        dropout_rate = st.slider("Taxa de Dropout:", 0.0, 0.9, 0.5, 0.1, key="dropout")
         patience = st.number_input("Paciência (Early Stopping):", 1, 20, config.TRAINING_PARAMS['patience'], key="patience")
         use_weighted_loss = st.checkbox("Usar Perda Ponderada", config.REGULARIZATION_PARAMS['use_weighted_loss'], key="weighted_loss")
+        
         st.header("Aumento de Dados")
         augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES, key="augmentation")
 
@@ -367,9 +381,10 @@ def main():
             app_config = {
                 'model_name': model_name, 'fine_tune': fine_tune, 'epochs': epochs,
                 'batch_size': batch_size, 'optimizer': optimizer, 'learning_rate': learning_rate,
-                'scheduler': scheduler, 'l2_lambda': l2_lambda, 'patience': patience,
-                'use_weighted_loss': use_weighted_loss, 'augmentation': augmentation,
-                'train_split': config.TRAINING_PARAMS['train_split']
+                'scheduler': scheduler, 
+                'l1_lambda': l1_lambda, 'l2_lambda': l2_lambda, 'dropout_rate': dropout_rate,
+                'patience': patience, 'use_weighted_loss': use_weighted_loss, 
+                'augmentation': augmentation, 'train_split': config.TRAINING_PARAMS['train_split']
             }
             data_dir = None
             temp_dir_to_clean = None
@@ -399,6 +414,8 @@ def main():
                             "history": st.session_state.history,
                             "metrics": st.session_state.metrics
                         }
+                        if not os.path.exists('results'):
+                            os.makedirs('results')
                         with open(results_filename, 'w') as f:
                             json.dump(results_data, f, indent=4)
                         st.success(f"Experimento concluído! Resultados salvos em `{results_filename}`")
@@ -458,6 +475,8 @@ def main():
 
     with tab4:
         st.header("4. Comparação de Experimentos")
+        if not os.path.exists('results'):
+            os.makedirs('results')
         results_files = [f for f in os.listdir('results') if f.endswith('.json')]
         if not results_files:
             st.info("Nenhum resultado de experimento encontrado. Execute um treinamento para começar.")
