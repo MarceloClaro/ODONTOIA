@@ -1,48 +1,68 @@
-"""
-Model definitions for the ODONTO.IA project.
-"""
 import torch
-from torch import nn
+import torch.nn as nn
 from torchvision import models
-from typing import Optional
+import streamlit as st
 
-def get_model(model_name: str, num_classes: int, fine_tune: bool = False) -> Optional[nn.Module]:
+def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout_rate: float = 0.5):
     """
-    Loads a pretrained model and replaces the final layer for transfer learning.
-    
+    Carrega um modelo pré-treinado e o adapta para a tarefa de classificação.
+
     Args:
-        model_name (str): The name of the model to load (e.g., 'ResNet18').
-        num_classes (int): The number of output classes.
-        fine_tune (bool): If True, all model parameters are unfrozen for fine-tuning.
-    
+        model_name (str): Nome do modelo a ser carregado (ex: 'resnet50', 'densenet121').
+        num_classes (int): Número de classes de saída.
+        fine_tune (bool): Se True, descongela todos os pesos para fine-tuning.
+        dropout_rate (float): A taxa de dropout a ser usada na camada de classificação.
+
     Returns:
-        Optional[nn.Module]: The loaded model or None if the name is not supported.
+        torch.nn.Module: O modelo adaptado.
     """
-    model: Optional[nn.Module] = None
-    weights = 'DEFAULT' # Use the latest recommended weights
+    try:
+        # Seleciona o modelo com base no nome
+        if model_name == 'resnet50':
+            model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+            num_ftrs = model.fc.in_features
+            # Substitui a camada de classificação
+            model.fc = nn.Sequential(
+                nn.Dropout(p=dropout_rate),
+                nn.Linear(num_ftrs, num_classes)
+            )
+        elif model_name == 'densenet121':
+            model = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT)
+            num_ftrs = model.classifier.in_features
+            # Substitui a camada de classificação
+            model.classifier = nn.Sequential(
+                nn.Dropout(p=dropout_rate),
+                nn.Linear(num_ftrs, num_classes)
+            )
+        elif model_name == 'efficientnet_b0':
+            model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
+            num_ftrs = model.classifier[1].in_features
+            # Substitui a camada de classificação
+            model.classifier = nn.Sequential(
+                nn.Dropout(p=dropout_rate, inplace=True),
+                nn.Linear(num_ftrs, num_classes),
+            )
+        else:
+            st.error(f"Modelo '{model_name}' não suportado.")
+            return None
 
-    if model_name == 'ResNet18':
-        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    elif model_name == 'ResNet50':
-        model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-    elif model_name == 'DenseNet121':
-        model = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT)
-    
-    if model is None:
+        # Congela ou descongela os pesos com base no parâmetro fine_tune
+        if not fine_tune:
+            for param in model.parameters():
+                param.requires_grad = False
+            # Garante que os parâmetros da nova camada de classificação sejam treináveis
+            if hasattr(model, 'fc'):
+                for param in model.fc.parameters():
+                    param.requires_grad = True
+            elif hasattr(model, 'classifier'):
+                for param in model.classifier.parameters():
+                    param.requires_grad = True
+        else:
+            for param in model.parameters():
+                param.requires_grad = True
+
+        return model
+
+    except Exception as e:
+        st.error(f"Erro ao carregar o modelo '{model_name}': {e}")
         return None
-
-    # Freeze or unfreeze parameters based on the fine_tune flag
-    for param in model.parameters():
-        param.requires_grad = fine_tune
-
-    # Replace the classifier layer
-    if isinstance(model, models.ResNet):
-        num_ftrs = model.fc.in_features
-        # Unfreeze the new classifier layer
-        model.fc = nn.Linear(num_ftrs, num_classes)
-    elif isinstance(model, models.DenseNet):
-        num_ftrs = model.classifier.in_features
-        # Unfreeze the new classifier layer
-        model.classifier = nn.Linear(num_ftrs, num_classes)
-
-    return model
