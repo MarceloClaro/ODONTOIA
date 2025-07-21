@@ -17,7 +17,6 @@ from typing import List, Dict, Any, cast, Tuple, Sized
 # Import advanced optimizers
 from lion_pytorch import Lion
 from pytorch_ranger import Ranger
-# from Sophia.Sophia import SophiaG
 
 import config
 
@@ -90,8 +89,6 @@ def get_optimizer(model: nn.Module, optimizer_name: str, learning_rate: float, l
         return Ranger(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     elif optimizer_name == 'Lion':
         return Lion(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
-    # elif optimizer_name == 'Sophia':
-    #     return SophiaG(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     else:
         st.warning(f"Otimizador '{optimizer_name}' não reconhecido. Usando Adam como padrão.")
         return optim.Adam(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
@@ -111,7 +108,8 @@ def get_scheduler(optimizer: optim.Optimizer, scheduler_name: str, epochs: int, 
 
 def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoader, 
                criterion: nn.Module, optimizer: optim.Optimizer, scheduler, 
-               epochs: int, patience: int, augmentation_technique: str) -> Dict[str, Any]:
+               epochs: int, patience: int, augmentation_technique: str,
+               l1_lambda: float = 0.0) -> Dict[str, Any]:  # Adicionado parâmetro l1_lambda
     """The main training loop."""
     best_model_wts = copy.deepcopy(model.state_dict())
     best_val_loss = float('inf')
@@ -128,7 +126,6 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
     # The MONAI Dataset is wrapped, so we can get its length.
     train_dataset_size = len(cast(Sized, train_loader.dataset))
     valid_dataset_size = len(cast(Sized, valid_loader.dataset))
-
 
     for epoch in range(epochs):
         model.train()
@@ -157,6 +154,11 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 _, preds = torch.max(outputs, 1)
+
+            # Aplicar regularização L1 (LASSO) se l1_lambda > 0
+            if l1_lambda > 0:
+                l1_penalty = sum(p.abs().sum() for p in model.parameters() if p.requires_grad)
+                loss += l1_lambda * l1_penalty
 
             # Certifique-se de que a retropropagação ocorra antes de qualquer conversão
             loss.backward()
