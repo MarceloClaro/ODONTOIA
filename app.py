@@ -61,12 +61,12 @@ def prepare_data_splits(data_dir: str, train_split_ratio: float, seed: int) -> D
             if not fname.startswith('.'):
                 image_files.append(os.path.join(class_dir, fname))
                 labels.append(class_to_idx[target_class])
-    
+
     if not image_files:
         raise ValueError(f"Nenhuma imagem encontrada em '{data_dir}'.")
 
     data_dicts = [{"image": img, "label": lab} for img, lab in zip(image_files, labels)]
-    
+
     train_val_indices, test_indices = train_test_split(
         list(range(len(data_dicts))), test_size=0.2,
         stratify=[d['label'] for d in data_dicts], random_state=seed
@@ -94,10 +94,11 @@ def run_training_pipeline(app_config: Dict[str, Any]):
         num_classes = len(classes)
         st.success(f"Dados divididos: {len(train_data)} treino, {len(valid_data)} validação, {len(test_data)} teste.")
 
+        image_size = app_config.get('image_size', config.TRAINING_PARAMS['image_size'])
         train_transform = Compose([
             LoadImaged(keys=["image"]), EnsureChannelFirstd(keys=["image"]),
             Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
-            Resized(keys=["image"], spatial_size=(app_config['image_size'], app_config['image_size'])),
+            Resized(keys=["image"], spatial_size=(image_size, image_size)),
             *(
                 [RandFlipd(keys=["image"], prob=0.5, spatial_axis=0),
                  RandRotate90d(keys=["image"], prob=0.5, max_k=3),
@@ -109,7 +110,7 @@ def run_training_pipeline(app_config: Dict[str, Any]):
         val_transform = Compose([
             LoadImaged(keys=["image"]), EnsureChannelFirstd(keys=["image"]),
             Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
-            Resized(keys=["image"], spatial_size=(app_config['image_size'], app_config['image_size'])),
+            Resized(keys=["image"], spatial_size=(image_size, image_size)),
             ScaleIntensityd(keys=["image"]), EnsureTyped(keys=["image"], dtype=torch.float32),
         ])
 
@@ -136,13 +137,13 @@ def run_training_pipeline(app_config: Dict[str, Any]):
 
         optimizer = get_optimizer(model, app_config['optimizer'], app_config['learning_rate'], app_config['l2_lambda'])
         scheduler = get_scheduler(optimizer, app_config['scheduler'], app_config['epochs'], len(train_loader), app_config['learning_rate'])
-        
+
         status_placeholder.info("A iniciar o treino do modelo...")
         train_results = train_loop(model, train_loader, valid_loader, criterion, optimizer, scheduler, app_config['epochs'], app_config['patience'], config.DEVICE, l1_lambda=app_config.get('l1_lambda', 0.0), status_placeholder=status_placeholder)
-        
+
         model.load_state_dict(train_results['weights'])
         history = train_results['history']
-        
+
         st.write("### Curvas de Aprendizagem"); plot_metrics(history)
         st.write("### Avaliação no Conjunto de Teste"); eval_results = compute_metrics(model, test_loader, classes, config.DEVICE)
         metrics_report = eval_results["report"]; st.pyplot(eval_results["figure"])
@@ -166,20 +167,56 @@ def evaluate_image(model: nn.Module, image: Image.Image, classes: List[str]) -> 
         Resized(spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
         EnsureTyped(dtype=torch.float32),
     ])
-    image_tensor = transform(np.array(image).transpose(2,0,1))
+    # A transformação MONAI espera um array numpy com canais primeiro (C, H, W)
+    image_np = np.array(image).transpose(2, 0, 1)
+    image_tensor = transform(image_np)
     image_tensor = image_tensor.unsqueeze(0).to(config.DEVICE)
 
     with torch.no_grad():
         output = model(image_tensor)
         probabilities = torch.nn.functional.softmax(output, dim=1)
         confidence, predicted_idx = torch.max(probabilities, 1)
-    
+
     return classes[predicted_idx.item()], confidence.item()
 
 def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str):
     """Gera e exibe os mapas de ativação (XAI)."""
-    # Lógica de visualização (mantida da versão anterior)
-    pass # A sua lógica existente aqui
+    model.eval()
+    target_layer = model.layer4 if hasattr(model, 'layer4') else model.features if hasattr(model, 'features') else None
+    if target_layer is None:
+        st.error("Não foi possível encontrar a camada alvo para XAI.")
+        return
+
+    transform = Compose([
+        Resized(spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
+        EnsureTyped(dtype=torch.float32),
+    ])
+    image_np = np.array(image).transpose(2, 0, 1)
+    input_tensor = transform(image_np).unsqueeze(0).to(config.DEVICE)
+    
+    try:
+        cam_extractor_class = {'SmoothGradCAMpp': SmoothGradCAMpp, 'ScoreCAM': ScoreCAM, 'LayerCAM': LayerCAM}.get(xai_method)
+        if not cam_extractor_class:
+            st.error(f"Método XAI '{xai_method}' não suportado.")
+            return
+
+        with cam_extractor_class(model, target_layer) as cam_extractor:
+            out = model(input_tensor)
+            activation_map = cam_extractor(out.squeeze(0).argmax().item(), out)
+        
+        # Visualização
+        result = to_pil_image(activation_map[0].squeeze(0).cpu(), mode='F')
+        resized_map = result.resize(image.size, Image.Resampling.BICUBIC)
+        map_np = (np.array(resized_map) - np.min(resized_map)) / (np.max(resized_map) - np.min(resized_map))
+        heatmap = cv2.applyColorMap(np.uint8(255 * map_np), cv2.COLORMAP_JET)
+        superimposed_img = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB) * 0.4 + np.array(image) * 0.6
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        ax1.imshow(image); ax1.set_title('Original'); ax1.axis('off')
+        ax2.imshow(np.uint8(superimposed_img)); ax2.set_title(xai_method); ax2.axis('off')
+        st.pyplot(fig)
+    except Exception as e:
+        st.error(f"Erro ao gerar o mapa de ativação: {e}")
 
 def main():
     if 'training_done' not in st.session_state:
@@ -194,31 +231,30 @@ def main():
     st.title("ODONTO.IA - Bancada de Experimentação")
     
     with st.sidebar:
-        # (código da sidebar mantido como no ficheiro original)
         if os.path.exists("logo.png"): st.image("logo.png", width=200)
         st.title("🔬 Configurações do Experimento")
-        st.header("Modelo"); model_name = st.selectbox("Arquitetura:", config.AVAILABLE_MODELS)
-        fine_tune = st.checkbox("Fine-Tuning Completo", True)
-        st.header("Treinamento"); epochs = st.slider("Épocas:", 1, 100, 50)
-        batch_size = st.select_slider("Tamanho do Lote:", [4, 8, 16, 32], 32)
-        st.header("Otimização"); optimizer = st.selectbox("Otimizador:", config.AVAILABLE_OPTIMIZERS)
-        learning_rate = st.select_slider("Taxa de Aprendizagem:", [1e-3, 1e-4, 1e-5, 1e-6], 1e-4, format="%.0e")
-        scheduler = st.selectbox("Agendador de LR:", config.AVAILABLE_SCHEDULERS)
-        st.header("Regularização"); l1_lambda = st.number_input("Regularização L1 (Lasso):", 0.0, 0.1, 0.0, 0.001, format="%.4f")
-        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, 0.01, 0.001, format="%.4f")
-        dropout_rate = st.slider("Taxa de Dropout:", 0.0, 0.9, 0.5, 0.1)
-        patience = st.number_input("Paciência (Early Stopping):", 3, 20, 10)
-        use_weighted_loss = st.checkbox("Usar Perda Ponderada", True)
-        st.header("Aumento de Dados"); augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES)
+        st.header("Modelo"); model_name = st.selectbox("Arquitetura:", config.AVAILABLE_MODELS, key='sb_model')
+        fine_tune = st.checkbox("Fine-Tuning Completo", True, key='cb_finetune')
+        st.header("Treinamento"); epochs = st.slider("Épocas:", 1, 100, 50, key='sl_epochs')
+        batch_size = st.select_slider("Tamanho do Lote:", [4, 8, 16, 32], 32, key='sl_batch')
+        st.header("Otimização"); optimizer = st.selectbox("Otimizador:", config.AVAILABLE_OPTIMIZERS, key='sb_opt')
+        learning_rate = st.select_slider("Taxa de Aprendizagem:", [1e-3, 1e-4, 1e-5, 1e-6], 1e-4, format="%.0e", key='sl_lr')
+        scheduler = st.selectbox("Agendador de LR:", config.AVAILABLE_SCHEDULERS, key='sb_sched')
+        st.header("Regularização"); l1_lambda = st.number_input("L1 (Lasso):", 0.0, 0.1, 0.0, 0.001, format="%.4f", key='ni_l1')
+        l2_lambda = st.number_input("L2 (Weight Decay):", 0.0, 0.1, 0.01, 0.001, format="%.4f", key='ni_l2')
+        dropout_rate = st.slider("Dropout:", 0.0, 0.9, 0.5, 0.1, key='sl_drop')
+        patience = st.number_input("Paciência:", 3, 20, 10, key='ni_patience')
+        use_weighted_loss = st.checkbox("Usar Perda Ponderada", True, key='cb_weightloss')
+        st.header("Aumento de Dados"); augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES, key='sb_aug')
 
     tabs = st.tabs(["Treinamento", "Análise de Clustering", "Avaliação de Imagem", "Comparação", "Análise Técnica"])
     with tabs[0]:
         st.header("1. Fonte de Dados e Início")
-        data_source = st.radio("Selecione a fonte:", ("Usar dataset local", "Fazer upload de ZIP"))
-        zip_file = st.file_uploader("Carregue um ZIP", type=["zip"]) if data_source == "Fazer upload de ZIP" else None
+        data_source = st.radio("Selecione a fonte:", ("Usar dataset local", "Fazer upload de ZIP"), key='rad_source')
+        zip_file = st.file_uploader("Carregue um ZIP", type=["zip"], key='fu_zip') if data_source == "Fazer upload de ZIP" else None
         
-        if st.button("🚀 Iniciar Treinamento"):
-            app_config = locals() # Captura todas as variáveis locais da sidebar
+        if st.button("🚀 Iniciar Treinamento", key='bt_train'):
+            app_config = {k: v for k, v in locals().items() if k not in ['tabs', 'data_source', 'zip_file', 'app_config']}
             app_config.update(config.TRAINING_PARAMS)
             
             temp_dir_to_clean = None
@@ -236,15 +272,18 @@ def main():
                     display_environment_info()
                     train_result = run_training_pipeline(app_config)
                     if train_result:
-                        st.session_state.update(dict(zip(['model', 'classes', 'history', 'metrics'], train_result)))
+                        st.session_state.model, st.session_state.classes, st.session_state.history, st.session_state.metrics = train_result
                         st.session_state.training_done = True
                         st.session_state.data_dir = data_dir
                         
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         results_dir = 'results'; os.makedirs(results_dir, exist_ok=True)
-                        results_filename = os.path.join(results_dir, f"experiment_{app_config['model_name']}_{timestamp}.json")
+                        results_filename = os.path.join(results_dir, f"experiment_{model_name}_{timestamp}.json")
                         serializable_metrics = {k: v for k, v in st.session_state.metrics.items() if isinstance(v, (dict, float, int))}
-                        with open(results_filename, 'w') as f: json.dump({"config": app_config, "history": st.session_state.history, "metrics": serializable_metrics}, f, indent=4)
+                        
+                        config_to_save = {k: v for k, v in app_config.items() if isinstance(v, (str, int, float, bool))}
+
+                        with open(results_filename, 'w') as f: json.dump({"config": config_to_save, "history": st.session_state.history, "metrics": serializable_metrics}, f, indent=4)
                         st.success(f"Resultados guardados em `{results_filename}`"); st.balloons()
             finally:
                 if temp_dir_to_clean: shutil.rmtree(temp_dir_to_clean)
@@ -253,17 +292,17 @@ def main():
         st.header("2. Análise de Clustering (Embeddings)")
         if not st.session_state.training_done: st.warning("Treine um modelo primeiro.")
         else:
-            if st.button("Analisar Clusters"):
+            if st.button("Analisar Clusters", key='bt_cluster'):
+                st.info("Esta funcionalidade está em desenvolvimento.")
                 # Lógica para clustering aqui
-                pass
-
+                
     with tabs[2]:
         st.header("3. Avaliação e Interpretabilidade (XAI)")
         if not st.session_state.training_done: st.warning("Treine um modelo primeiro.")
         else:
             model, classes = st.session_state.model, st.session_state.classes
-            xai_method = st.selectbox("Método XAI:", config.AVAILABLE_XAI_METHODS)
-            eval_image_file = st.file_uploader("Upload de imagem para avaliação", type=["png", "jpg", "jpeg"])
+            xai_method = st.selectbox("Método XAI:", config.AVAILABLE_XAI_METHODS, key='sb_xai')
+            eval_image_file = st.file_uploader("Upload de imagem para avaliação", type=["png", "jpg", "jpeg"], key='fu_eval')
             if eval_image_file:
                 image = Image.open(eval_image_file).convert("RGB")
                 st.image(image, caption='Imagem para avaliação', width=300)
@@ -277,15 +316,24 @@ def main():
 
     with tabs[3]:
         st.header("4. Comparação de Experimentos")
-        # Lógica para comparação aqui
-        pass
+        results_dir = 'results'
+        if not os.path.exists(results_dir):
+            st.info("Nenhum resultado de experimento guardado.")
+        else:
+            results_files = [f for f in os.listdir(results_dir) if f.endswith('.json')]
+            selected_files = st.multiselect("Selecione os experimentos para comparar:", results_files, key='ms_compare')
+            if selected_files:
+                # Lógica para comparação aqui
+                pass
 
     with tabs[4]:
         st.header("5. Análise Técnica da Arquitetura")
         if not st.session_state.training_done: st.warning("Treine um modelo primeiro.")
         else:
-            # Lógica para análise técnica aqui
-            pass
+            model_name_used = st.session_state.model.__class__.__name__
+            prompt = f"Explique de maneira técnica a arquitetura de rede neural {model_name_used}..."
+            with st.spinner("Gerando análise técnica..."):
+                st.markdown(consulta_groq(prompt, temperature=0.3))
 
 if __name__ == "__main__":
     main()
