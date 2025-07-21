@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 st.set_page_config(page_title="ODONTO.IA", layout="wide")
-from groq_llm import interpretar_predicao, gerar_prognostico
+from groq_llm import interpretar_predicao, gerar_prognostico, consulta_groq
 
 import zipfile
 import shutil
@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.decomposition import PCA
-import streamlit as st
 import gc
 from torchcam.methods import SmoothGradCAMpp, ScoreCAM, LayerCAM
 from torchvision.transforms.functional import to_pil_image
@@ -42,7 +41,6 @@ from monai.transforms.spatial.dictionary import (
     Resized,
 )
 from monai.transforms.post.array import Activations, AsDiscrete
-
 
 # ODONTO.IA imports
 import config
@@ -75,9 +73,21 @@ class CustomDataset(Dataset):
 def run_training_pipeline(app_config):
     """Main function to run the training and evaluation pipeline."""
     try:
+        # Verificar se estamos usando um diretório personalizado (do ZIP)
+        if 'data_dir' in app_config:
+            # Atualizar os diretórios de treino/validação/teste
+            config.DATASET_PATH = app_config['data_dir']
+            config.TRAIN_DIR = os.path.join(config.DATASET_PATH, "train")
+            config.VALID_DIR = os.path.join(config.DATASET_PATH, "valid")
+            config.TEST_DIR = os.path.join(config.DATASET_PATH, "test")
+            
+            # Se não houver subdiretórios train/valid/test, assume que o próprio diretório raiz é o dataset
+            if not os.path.exists(config.TRAIN_DIR):
+                config.TRAIN_DIR = config.DATASET_PATH
+                config.VALID_DIR = config.DATASET_PATH  # Será dividido depois
+                config.TEST_DIR = config.DATASET_PATH   # Será dividido depois
+            
         # --- MONAI Data Pipeline ---
-        
-        # Define transforms
         train_transforms_list = [
             LoadImaged(keys=["image"]),
             EnsureChannelFirstd(keys=["image"]),
@@ -87,7 +97,6 @@ def run_training_pipeline(app_config):
             EnsureTyped(keys=["image"], dtype=torch.float32),
         ]
         
-        # Add augmentations if selected
         if app_config['augmentation'] != 'Nenhum':
             train_transforms_list.extend([
                 RandFlipd(keys=["image"], prob=0.5, spatial_axis=0),
@@ -142,7 +151,6 @@ def run_training_pipeline(app_config):
         valid_dataset = MONAIDataset(data=valid_data, transform=val_transform)
         test_dataset = MONAIDataset(data=test_data, transform=val_transform)
 
-
         st.info(f"Dataset carregado com MONAI: {len(train_dataset)} imagens de treino, "
                 f"{len(valid_dataset)} de validação e {len(test_dataset)} de teste.")
         
@@ -160,7 +168,6 @@ def run_training_pipeline(app_config):
         st.info(f"Shape do tensor de imagem do MONAI: {sample['image'].shape}")
         st.info(f"Tipo de dado do tensor: {sample['image'].dtype}")
         st.info(f"Estrutura do item do Dataset (chaves): {sample.keys()}")
-
 
     except Exception as e:
         st.error(f"Erro ao carregar dados com MONAI: {e}. Verifique os caminhos e as permissões.")
@@ -187,7 +194,12 @@ def run_training_pipeline(app_config):
         criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(config.DEVICE))
 
     # --- Model, Optimizer, Scheduler ---
-    model = get_model(app_config['model_name'], num_classes, fine_tune=app_config['fine_tune'])
+    model = get_model(
+        app_config['model_name'], 
+        num_classes, 
+        fine_tune=app_config['fine_tune'], 
+        dropout_rate=app_config['dropout_rate']
+    )
     if model is None:
         st.error("Falha ao carregar o modelo.")
         return None
@@ -198,8 +210,11 @@ def run_training_pipeline(app_config):
     scheduler = get_scheduler(optimizer, app_config['scheduler'], app_config['epochs'], len(train_loader))
 
     # --- Training ---
-    train_results = train_loop(model, train_loader, valid_loader, criterion, optimizer, scheduler, 
-                                app_config['epochs'], app_config['patience'], app_config['augmentation'])
+    train_results = train_loop(
+        model, train_loader, valid_loader, criterion, optimizer, scheduler, 
+        app_config['epochs'], app_config['patience'], app_config['augmentation'],
+        l1_lambda=app_config['l1_lambda']
+    )
     
     best_model_wts = train_results['weights']
     history = train_results['history']
@@ -405,7 +420,9 @@ def main():
         scheduler = st.selectbox("Agendador de LR:", config.AVAILABLE_SCHEDULERS, key="scheduler")
         
         st.header("Regularização")
-        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2")
+        l1_lambda = st.number_input("Regularização L1 (Lasso):", 0.0, 0.1, 0.0, 0.001, key="l1", format="%.4f")
+        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2", format="%.4f")
+        dropout_rate = st.slider("Taxa de Dropout:", 0.0, 0.9, 0.5, 0.1, key="dropout")
         patience = st.number_input("Paciência (Early Stopping):", 1, 20, config.TRAINING_PARAMS['patience'], key="patience")
         use_weighted_loss = st.checkbox("Usar Perda Ponderada", config.REGULARIZATION_PARAMS['use_weighted_loss'], key="weighted_loss")
         
@@ -413,7 +430,13 @@ def main():
         augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES, key="augmentation")
 
     # --- Main App Body ---
-    tab1, tab2, tab3, tab4 = st.tabs(["Treinamento", "Análise de Clustering", "Avaliação de Imagem", "Comparação de Experimentos"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Treinamento", 
+        "Análise de Clustering", 
+        "Avaliação de Imagem", 
+        "Comparação de Experimentos", 
+        "Análise Técnica da Arquitetura"
+    ])
 
     with tab1:
         st.header("1. Fonte de Dados e Início")
@@ -426,9 +449,10 @@ def main():
             app_config = {
                 'model_name': model_name, 'fine_tune': fine_tune, 'epochs': epochs,
                 'batch_size': batch_size, 'optimizer': optimizer, 'learning_rate': learning_rate,
-                'scheduler': scheduler, 'l2_lambda': l2_lambda, 'patience': patience,
-                'use_weighted_loss': use_weighted_loss, 'augmentation': augmentation,
-                'train_split': config.TRAINING_PARAMS['train_split']
+                'scheduler': scheduler, 
+                'l1_lambda': l1_lambda, 'l2_lambda': l2_lambda, 'dropout_rate': dropout_rate,
+                'patience': patience, 'use_weighted_loss': use_weighted_loss, 
+                'augmentation': augmentation, 'train_split': config.TRAINING_PARAMS['train_split']
             }
             
             data_dir = None
@@ -449,6 +473,7 @@ def main():
 
                 if os.path.isdir(data_dir):
                     app_config['data_dir'] = data_dir
+                    st.info(f"Usando diretório de dados: {data_dir}")
                     train_result = run_training_pipeline(app_config)
                     if train_result:
                         st.session_state.model, st.session_state.classes, st.session_state.history, st.session_state.metrics = train_result
@@ -457,6 +482,8 @@ def main():
                         
                         # Save results
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        if not os.path.exists('results'):
+                            os.makedirs('results')
                         results_filename = f"results/experiment_{app_config['model_name']}_{timestamp}.json"
                         results_data = {
                             "config": app_config,
@@ -521,8 +548,6 @@ def main():
                 st.metric(label="Classe Predita", value=class_name, delta=f"Confiança: {confidence:.2%}")
     
                 # --- Integração Groq LLM ---
-                from groq_llm import interpretar_predicao, gerar_prognostico
-    
                 with st.spinner("Consultando IA Groq para interpretação clínica..."):
                     interpretacao = interpretar_predicao(class_name)
                     st.write("**Interpretação clínica (IA Groq):**", interpretacao)
@@ -530,7 +555,6 @@ def main():
                 with st.spinner("Consultando IA Groq para prognóstico..."):
                     prognostico = gerar_prognostico(class_name)
                     st.write("**Prognóstico clínico (IA Groq):**", prognostico)
-                # --- Fim Integração Groq LLM ---
     
                 visualize_activations(model, image, xai_method)
     
@@ -542,6 +566,8 @@ def main():
     with tab4:
         st.header("4. Comparação de Experimentos")
         
+        if not os.path.exists('results'):
+            os.makedirs('results')
         results_files = [f for f in os.listdir('results') if f.endswith('.json')]
         
         if not results_files:
@@ -575,6 +601,9 @@ def main():
                         "Modelo": conf.get('model_name', 'N/A'),
                         "Otimizador": conf.get('optimizer', 'N/A'),
                         "LR": conf.get('learning_rate', 'N/A'),
+                        "L1": conf.get('l1_lambda', 'N/A'),
+                        "L2": conf.get('l2_lambda', 'N/A'),
+                        "Dropout": conf.get('dropout_rate', 'N/A'),
                         "Augmentation": conf.get('augmentation', 'N/A'),
                         "F1-Score (Macro)": met.get('macro avg', {}).get('f1-score', 0),
                         "Acurácia": met.get('accuracy', 0)
@@ -598,6 +627,27 @@ def main():
                 ax2.set_xlabel('Épocas'); ax2.set_ylabel('Acurácia'); ax2.grid(True); ax2.legend()
                 st.pyplot(fig)
 
+    with tab5:
+        st.header("Análise Técnica da Arquitetura do Modelo")
+        if st.session_state.training_done and st.session_state.model:
+            model_name_used = st.session_state.model.__class__.__name__
+            prompt = (
+                f"Explique de maneira técnica, rigorosa e didática o funcionamento, "
+                f"a metodologia científica, os fundamentos matemáticos e os cálculos envolvidos "
+                f"na arquitetura de rede neural {model_name_used} utilizada para classificação de imagens de lesões bucais. "
+                f"Divida a resposta em tópicos: objetivo, funcionamento, equações matemáticas relevantes, "
+                f"fundamentos estatísticos (como função de perda, otimização, regularização), e explique passo a passo. "
+                f"Inclua exemplos numéricos ou cálculos simples para ilustrar."
+            )
+            with st.spinner("Gerando análise técnica detalhada via IA Groq..."):
+                try:
+                    analise_tecnica = consulta_groq(prompt, temperature=0.3, max_tokens=2048)
+                    st.markdown(analise_tecnica)
+                except Exception as e:
+                    st.error(f"Erro ao consultar IA Groq: {e}")
+                    st.markdown("Não foi possível obter resposta da IA no momento.")
+        else:
+            st.info("Treine um modelo antes para visualizar a análise técnica da arquitetura.")
 
 if __name__ == "__main__":
     main()
