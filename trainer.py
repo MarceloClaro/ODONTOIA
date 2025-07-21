@@ -1,693 +1,205 @@
-import os
-import streamlit as st
-st.set_page_config(page_title="ODONTO.IA", layout="wide")
-from groq_llm import interpretar_predicao, gerar_prognostico, consulta_groq
+# trainer.py
 
-import zipfile
-import shutil
-import tempfile
+import torch
+import torch.nn as nn
+from torch.optim import Adam, AdamW, SGD
+from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
+from torch.utils.data import DataLoader
+from sklearn.metrics import classification_report, confusion_matrix
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
-from PIL import Image
-import torch
-from torch import nn
-from torch.utils.data import DataLoader, Dataset, Subset
-from torchvision import datasets
-from sklearn.cluster import AgglomerativeClustering, KMeans
-from sklearn.decomposition import PCA
-import gc
-from torchcam.methods import SmoothGradCAMpp, ScoreCAM, LayerCAM
-from torchvision.transforms.functional import to_pil_image
-import cv2
-from typing import List, Tuple, Optional, Any, cast
-import json
-from datetime import datetime
-import torchvision
+import streamlit as st
+from tqdm.auto import tqdm
 import copy
+from typing import List, Dict, Any
 
-# MONAI imports
-from monai.data.dataloader import DataLoader
-from monai.data.image_dataset import ImageDataset
-from monai.data.dataset import Dataset as MONAIDataset
-from monai.transforms.compose import Compose
-from monai.transforms.io.dictionary import LoadImaged
-from monai.transforms.utility.dictionary import EnsureChannelFirstd, EnsureTyped, Lambdad
-from monai.transforms.intensity.dictionary import ScaleIntensityd
-from monai.transforms.spatial.dictionary import (
-    RandFlipd,
-    RandRotate90d,
-    RandZoomd,
-    Resized,
-)
-from monai.transforms.post.array import Activations, AsDiscrete
+import config # ODONTO.IA import
 
-# ODONTO.IA imports
-import config
-from utils import (set_seed, seed_worker, visualize_data,
-                   plot_class_distribution, plot_metrics, visualize_augmented_data,
-                   display_model_architecture, display_environment_info, interpret_results)
-from models import get_model
-
-from llm_modal import show_disease_modal, get_disease_key
-
-# Set seed for reproducibility
-set_seed(config.SEED)
-
-class CustomDataset(Dataset):
-    """Custom Dataset wrapper."""
-    def __init__(self, subset: Subset, transform: Optional[Any] = None):
-        self.subset = subset
-        self.transform = transform
-
-    def __getitem__(self, index: int) -> Tuple[Any, Any]:
-        original_index = self.subset.indices[index]
-        x, y = self.subset.dataset[original_index]
-        if self.transform:
-            x = self.transform(x)
-        return x, y
-
-    def __len__(self) -> int:
-        return len(self.subset)
-
-def run_training_pipeline(app_config):
-    """Main function to run the training and evaluation pipeline."""
-    try:
-        # Verificar se estamos usando um diretório personalizado (do ZIP)
-        if 'data_dir' in app_config:
-            # Atualizar os diretórios de treino/validação/teste
-            config.DATASET_PATH = app_config['data_dir']
-            config.TRAIN_DIR = os.path.join(config.DATASET_PATH, "train")
-            config.VALID_DIR = os.path.join(config.DATASET_PATH, "valid")
-            config.TEST_DIR = os.path.join(config.DATASET_PATH, "test")
-            
-            # Se não houver subdiretórios train/valid/test, assume que o próprio diretório raiz é o dataset
-            if not os.path.exists(config.TRAIN_DIR):
-                config.TRAIN_DIR = config.DATASET_PATH
-                config.VALID_DIR = config.DATASET_PATH  # Será dividido depois
-                config.TEST_DIR = config.DATASET_PATH   # Será dividido depois
-            
-        # --- MONAI Data Pipeline ---
-        train_transforms_list = [
-            LoadImaged(keys=["image"]),
-            EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
-            ScaleIntensityd(keys=["image"]),
-            Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
-            EnsureTyped(keys=["image"], dtype=torch.float32),
-        ]
-        
-        if app_config['augmentation'] != 'Nenhum':
-            train_transforms_list.extend([
-                RandFlipd(keys=["image"], prob=0.5, spatial_axis=0),
-                RandRotate90d(keys=["image"], prob=0.5, max_k=3),
-                RandZoomd(keys=["image"], prob=0.5, min_zoom=0.9, max_zoom=1.1),
-            ])
-            
-        train_transform = Compose(train_transforms_list)
-
-        val_transform = Compose([
-            LoadImaged(keys=["image"]),
-            EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
-            ScaleIntensityd(keys=["image"]),
-            Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
-            EnsureTyped(keys=["image"], dtype=torch.float32),
-        ])
-
-        # Discover classes and create file lists
-        train_files, train_labels, classes = [], [], sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
-        class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
-        for target_class in classes:
-            class_dir = os.path.join(config.TRAIN_DIR, target_class)
-            for fname in os.listdir(class_dir):
-                train_files.append(os.path.join(class_dir, fname))
-                train_labels.append(class_to_idx[target_class])
-
-        valid_files, valid_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.VALID_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    valid_files.append(os.path.join(class_dir, fname))
-                    valid_labels.append(class_to_idx[target_class])
-
-        test_files, test_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.TEST_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    test_files.append(os.path.join(class_dir, fname))
-                    test_labels.append(class_to_idx[target_class])
-
-        num_classes = len(classes)
-
-        # Create MONAI Datasets
-        train_data = [{"image": img, "label": lab} for img, lab in zip(train_files, train_labels)]
-        valid_data = [{"image": img, "label": lab} for img, lab in zip(valid_files, valid_labels)]
-        test_data = [{"image": img, "label": lab} for img, lab in zip(test_files, test_labels)]
-
-        train_dataset = MONAIDataset(data=train_data, transform=train_transform)
-        valid_dataset = MONAIDataset(data=valid_data, transform=val_transform)
-        test_dataset = MONAIDataset(data=test_data, transform=val_transform)
-
-        st.info(f"Dataset carregado com MONAI: {len(train_dataset)} imagens de treino, "
-                f"{len(valid_dataset)} de validação e {len(test_dataset)} de teste.")
-        
-        # --- DEBUG LOGS ---
-        st.write(f"DEBUG: Lendo dados de: TRAIN='{config.TRAIN_DIR}', VALID='{config.VALID_DIR}', TEST='{config.TEST_DIR}'")
-        st.write(f"DEBUG: Classes encontradas ({num_classes}): {classes}")
-        st.write(f"DEBUG: Mapeamento de classes: {class_to_idx}")
-        st.write(f"DEBUG: Total de arquivos de treino: {len(train_files)}, Validação: {len(valid_files)}, Teste: {len(test_files)}")
-        # --- FIM DEBUG LOGS ---
-
-        # Visualize a sample from the MONAI dataset
-        check_ds = MONAIDataset(data=train_data, transform=train_transform)
-        check_loader = DataLoader(check_ds, batch_size=1)
-        sample = next(iter(check_loader))
-        st.info(f"Shape do tensor de imagem do MONAI: {sample['image'].shape}")
-        st.info(f"Tipo de dado do tensor: {sample['image'].dtype}")
-        st.info(f"Estrutura do item do Dataset (chaves): {sample.keys()}")
-
-    except Exception as e:
-        st.error(f"Erro ao carregar dados com MONAI: {e}. Verifique os caminhos e as permissões.")
-        return None
-
-    g = torch.Generator().manual_seed(config.SEED)
-    train_loader = DataLoader(train_dataset, batch_size=app_config['batch_size'], shuffle=True, worker_init_fn=seed_worker, generator=g)
-    valid_loader = DataLoader(valid_dataset, batch_size=app_config['batch_size'])
-    test_loader = DataLoader(test_dataset, batch_size=app_config['batch_size'])
-
-    # --- Visualizations ---
-    st.subheader("Análise do Conjunto de Dados")
-    plot_class_distribution(train_dataset, classes, title="Distribuição de Classes (Treino)")
-    plot_class_distribution(valid_dataset, classes, title="Distribuição de Classes (Validação)")
-
-    if app_config['augmentation'] != 'Nenhum':
-        visualize_augmented_data(train_loader)
-
-    # --- Loss Function ---
-    criterion = nn.CrossEntropyLoss()
-    if app_config['use_weighted_loss']:
-        class_counts = np.bincount(train_labels, minlength=num_classes)
-        class_weights = 1.0 / (class_counts + 1e-6)
-        criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor(class_weights).to(config.DEVICE))
-
-    # --- Model, Optimizer, Scheduler ---
-    # Versão adaptativa para chamada do get_model
-    try:
-        # Tenta chamar com dropout_rate (versão nova)
-        model = get_model(
-            app_config['model_name'].lower(),  # Convertido para minúsculas para maior compatibilidade 
-            num_classes, 
-            fine_tune=app_config['fine_tune'], 
-            dropout_rate=app_config['dropout_rate']
-        )
-    except TypeError:
-        # Se falhar, chama sem dropout_rate (versão antiga)
-        st.warning("Usando versão antiga da função get_model() sem suporte a dropout.")
-        model = get_model(
-            app_config['model_name'].lower(),  # Convertido para minúsculas
-            num_classes, 
-            fine_tune=app_config['fine_tune']
-        )
-
-    if model is None:
-        st.error(f"Falha ao carregar o modelo '{app_config['model_name']}'. Verifique se o nome está correto.")
-        return None
-
-    display_model_architecture(model, app_config['model_name'])
-    model.to(config.DEVICE)
-
-    optimizer = get_optimizer(model, app_config['optimizer'], app_config['learning_rate'], app_config['l2_lambda'])
-    scheduler = get_scheduler(optimizer, app_config['scheduler'], app_config['epochs'], len(train_loader))
-
-    # --- Training ---
-    # Versão adaptativa para chamada do train_loop
-    try:
-        # Tenta chamar com l1_lambda (versão nova)
-        train_results = train_loop(
-            model, train_loader, valid_loader, criterion, optimizer, scheduler, 
-            app_config['epochs'], app_config['patience'], app_config['augmentation'],
-            l1_lambda=app_config['l1_lambda']
-        )
-    except TypeError:
-        # Se falhar, chama sem l1_lambda (versão antiga)
-        st.warning("Usando versão antiga da função train_loop() sem suporte a regularização L1.")
-        train_results = train_loop(
-            model, train_loader, valid_loader, criterion, optimizer, scheduler, 
-            app_config['epochs'], app_config['patience'], app_config['augmentation']
-        )
-    
-    best_model_wts = train_results['weights']
-    history = train_results['history']
-    
-    model.load_state_dict(best_model_wts)
-    
-    # --- Evaluation ---
-    st.write("**Curvas de Aprendizagem**")
-    plot_metrics(history)
-
-    st.write("**Avaliação no Conjunto de Teste**")
-    metrics_report = compute_metrics(model, test_loader, classes)
-    interpret_results(metrics_report, history)
-    st.write("**Análise de Erros**")
-    error_analysis(model, test_loader, classes)
-    
-    gc.collect()
-    return model, classes, history, metrics_report
-
-def extract_features(dataset: datasets.ImageFolder, model: nn.Module, batch_size: int) -> Tuple[np.ndarray, np.ndarray, List[str]]:
-    if isinstance(model, nn.DataParallel):
-        model = model.module # Handle DataParallel wrapper
-        
-    feature_extractor_layers = []
-    if hasattr(model, 'features'): # DenseNet, etc.
-        feature_extractor_layers.append(model.features)
-        feature_extractor_layers.append(nn.AdaptiveAvgPool2d((1, 1)))
-    elif hasattr(model, 'fc'): # ResNet
-        # Remove the final fully connected layer
-        feature_extractor_layers.extend(list(model.children())[:-1])
+# Funções de Otimizador e Agendador (Scheduler)
+def get_optimizer(model: nn.Module, optimizer_name: str, learning_rate: float, l2_lambda: float) -> torch.optim.Optimizer:
+    """Cria um otimizador para o modelo."""
+    if optimizer_name == 'Adam':
+        return Adam(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+    elif optimizer_name == 'AdamW':
+        return AdamW(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+    elif optimizer_name == 'SGD':
+        return SGD(model.parameters(), lr=learning_rate, weight_decay=l2_lambda, momentum=0.9)
+    # Adicione outros otimizadores aqui, como 'Ranger' ou 'Lion', se necessário
+    # Ex: from pytorch_ranger import Ranger
+    #     if optimizer_name == 'Ranger':
+    #         return Ranger(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     else:
-        st.error("Arquitetura de modelo não suportada para extração de features.")
-        return np.array([]), np.array([]), []
+        raise ValueError(f"Otimizador '{optimizer_name}' não suportado.")
 
-    feature_extractor = nn.Sequential(*feature_extractor_layers)
-    feature_extractor.eval()
-    # Use shuffle=False to keep image paths and labels aligned
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    features, labels, paths = [], [], []
-    with torch.no_grad():
-        # We need to get the paths from the dataset samples
-        for i, (inputs, lbls) in enumerate(dataloader):
-            outputs = feature_extractor(inputs.to(config.DEVICE))
-            features.append(outputs.cpu().numpy().reshape(len(outputs), -1))
-            labels.extend(lbls.numpy())
-            
-            # Get the file paths for the current batch
-            start_index = i * batch_size
-            end_index = start_index + len(inputs)
-            batch_paths = [dataset.samples[j][0] for j in range(start_index, end_index)]
-            paths.extend(batch_paths)
-            
-    return np.concatenate(features), np.array(labels), paths
+def get_scheduler(optimizer: torch.optim.Optimizer, scheduler_name: str, epochs: int, steps_per_epoch: int) -> torch.optim.lr_scheduler._LRScheduler:
+    """Cria um agendador de taxa de aprendizado (learning rate scheduler)."""
+    if scheduler_name == 'CosineAnnealingLR':
+        return CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+    elif scheduler_name == 'OneCycleLR':
+        return OneCycleLR(optimizer, max_lr=config.TRAINING_PARAMS['learning_rate'], steps_per_epoch=steps_per_epoch, epochs=epochs)
+    elif scheduler_name == 'Nenhum':
+        return None
+    else:
+        raise ValueError(f"Agendador '{scheduler_name}' não suportado.")
 
-def perform_clustering(features: np.ndarray, num_clusters: int) -> Tuple[np.ndarray, np.ndarray]:
-    hierarchical = AgglomerativeClustering(n_clusters=num_clusters).fit_predict(features)
-    kmeans = KMeans(n_clusters=num_clusters, random_state=config.SEED, n_init=10).fit_predict(features)
-    return hierarchical, kmeans
-
-def evaluate_clustering(true_labels: np.ndarray, cluster_labels: np.ndarray, method_name: str):
-    from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
-    st.write(f"**Métricas para {method_name}:**")
-    st.write(f"Adjusted Rand Index: {adjusted_rand_score(true_labels, cluster_labels):.4f}")
-    st.write(f"Normalized Mutual Information: {normalized_mutual_info_score(true_labels, cluster_labels):.4f}")
-
-def visualize_clusters(features: np.ndarray, true_labels: np.ndarray, hierarchical_labels: np.ndarray, kmeans_labels: np.ndarray, classes: List[str]):
-    pca = PCA(n_components=2)
-    reduced_features = pca.fit_transform(features)
+# Lógica de Treino
+def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoader,
+               criterion: nn.Module, optimizer: torch.optim.Optimizer, scheduler: Any,
+               epochs: int, patience: int, augmentation: str, l1_lambda: float = 0.0):
+    """Loop principal de treinamento do modelo."""
+    best_val_acc = 0.0
+    best_model_wts = copy.deepcopy(model.state_dict())
+    epochs_no_improve = 0
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
     
-    df = pd.DataFrame({
-        'pca1': reduced_features[:, 0],
-        'pca2': reduced_features[:, 1],
-        'true_labels': [classes[l] for l in true_labels],
-        'hierarchical': hierarchical_labels,
-        'kmeans': kmeans_labels
-    })
+    progress_bar = tqdm(range(epochs), desc="Épocas")
 
-    fig, axes = plt.subplots(1, 3, figsize=(21, 6))
-    import seaborn as sns
-    sns.scatterplot(data=df, x='pca1', y='pca2', hue='hierarchical', palette="deep", ax=axes[0], legend='full').set_title('Clustering Hierárquico')
-    sns.scatterplot(data=df, x='pca1', y='pca2', hue='kmeans', palette="deep", ax=axes[1], legend='full').set_title('K-Means')
-    sns.scatterplot(data=df, x='pca1', y='pca2', hue='true_labels', palette="tab10", ax=axes[2], legend='full').set_title('Classes Verdadeiras')
-    st.pyplot(fig)
+    for epoch in progress_bar:
+        # Treino
+        model.train()
+        train_loss, train_corrects = 0.0, 0
+        for batch in train_loader:
+            inputs, labels = batch['image'].to(config.DEVICE), batch['label'].to(config.DEVICE)
+            
+            optimizer.zero_grad()
+            
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            
+            # Regularização L1
+            if l1_lambda > 0:
+                l1_norm = sum(p.abs().sum() for p in model.parameters())
+                loss += l1_lambda * l1_norm
+                
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item() * inputs.size(0)
+            _, preds = torch.max(outputs, 1)
+            train_corrects += torch.sum(preds == labels.data)
 
-def evaluate_image(model: nn.Module, image: Image.Image, classes: List[str]) -> Tuple[str, float]:
-    model.eval()
-    image_tensor = config.test_transforms(image)
-    if not isinstance(image_tensor, torch.Tensor):
-        st.error("A transformação da imagem não retornou um tensor.")
-        return "Erro", 0.0
+        if scheduler and not isinstance(scheduler, OneCycleLR):
+            scheduler.step()
         
-    image_tensor = image_tensor.unsqueeze(0).to(config.DEVICE)
-    with torch.set_grad_enabled(True):
-        output = model(image_tensor)
+        # Validação
+        model.eval()
+        val_loss, val_corrects = 0.0, 0
+        with torch.no_grad():
+            for batch in valid_loader:
+                inputs, labels = batch['image'].to(config.DEVICE), batch['label'].to(config.DEVICE)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item() * inputs.size(0)
+                _, preds = torch.max(outputs, 1)
+                val_corrects += torch.sum(preds == labels.data)
 
+        # Cálculo das métricas da época
+        train_loss /= len(train_loader.dataset)
+        train_acc = train_corrects.double() / len(train_loader.dataset)
+        val_loss /= len(valid_loader.dataset)
+        val_acc = val_corrects.double() / len(valid_loader.dataset)
+        
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc.item())
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc.item())
+
+        progress_bar.set_postfix({
+            'Train Loss': f'{train_loss:.4f}', 'Train Acc': f'{train_acc:.4f}',
+            'Val Loss': f'{val_loss:.4f}', 'Val Acc': f'{val_acc:.4f}'
+        })
+
+        # Early Stopping
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_wts = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+        
+        if epochs_no_improve >= patience:
+            st.warning(f"Early stopping at epoch {epoch+1}")
+            break
+            
+    return {"weights": best_model_wts, "history": history}
+
+# Métricas e Análise de Erros
+def compute_metrics(model: nn.Module, dataloader: DataLoader, classes: List[str]) -> Dict[str, Any]:
+    """Calcula e exibe as métricas de classificação e a matriz de confusão."""
+    model.eval()
+    all_preds, all_labels = [], []
     with torch.no_grad():
-        probabilities = torch.nn.functional.softmax(output, dim=1)
-        confidence, predicted_idx = torch.max(probabilities, 1)
+        for batch in dataloader:
+            inputs, labels = batch['image'].to(config.DEVICE), batch['label'].to(config.DEVICE)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            
+    report = classification_report(all_labels, all_preds, target_names=classes, output_dict=True)
     
-    predicted_item = cast(int, predicted_idx.item())
-    return classes[predicted_item], confidence.item()
+    # Matriz de Confusão
+    cm = confusion_matrix(all_labels, all_preds)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=classes, yticklabels=classes, ax=ax)
+    ax.set_xlabel('Predito')
+    ax.set_ylabel('Verdadeiro')
+    ax.set_title('Matriz de Confusão')
+    st.pyplot(fig)
+    plt.close(fig)
+    
+    return report
 
-def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str):
-    # Create a deep copy of the model to avoid modifying the original with hooks
-    model_copy = copy.deepcopy(model)
-    model_copy.eval()
+def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str]):
+    """Exibe as imagens que foram classificadas incorretamente."""
+    model.eval()
+    error_images, true_labels, pred_labels = [], [], []
     
-    image_tensor = config.test_transforms(image)
-    if not isinstance(image_tensor, torch.Tensor):
-        st.error("A transformação da imagem não retornou um tensor.")
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs, labels = batch['image'].to(config.DEVICE), batch['label'].to(config.DEVICE)
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            
+            errors = preds != labels
+            if torch.any(errors):
+                error_indices = errors.nonzero(as_tuple=True)[0]
+                for idx in error_indices:
+                    error_images.append(inputs[idx].cpu())
+                    true_labels.append(classes[labels[idx].item()])
+                    pred_labels.append(classes[preds[idx].item()])
+
+    if not error_images:
+        st.success("Nenhum erro de classificação encontrado no conjunto de teste!")
         return
         
-    input_tensor = image_tensor.unsqueeze(0).to(config.DEVICE)
+    st.write(f"Total de {len(error_images)} erros de classificação:")
     
-    target_layer: Optional[nn.Module] = None
-    # Heuristics to find the last convolutional layer
-    if hasattr(model_copy, 'layer4') and isinstance(model_copy.layer4, nn.Module): # ResNet
-        target_layer = model_copy.layer4
-    elif hasattr(model_copy, 'features') and isinstance(model_copy.features, nn.Module): # DenseNet
-        target_layer = model_copy.features
+    num_cols = 5
+    num_rows = (len(error_images) + num_cols - 1) // num_cols
     
-    if target_layer is None:
-        st.warning("Não foi possível encontrar uma camada alvo adequada para XAI. A visualização pode não ser ideal.")
-        # Fallback to the last child module if it's a Sequential block
-        if len(list(model_copy.children())) > 0 and isinstance(list(model_copy.children())[-1], nn.Sequential):
-             target_layer = list(model_copy.children())[-1][-1] # type: ignore
-        if target_layer is None:
-             st.error("Não foi possível determinar a camada alvo para o Grad-CAM.")
-             return
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(15, 3 * num_rows))
+    axes = axes.flatten()
 
-    cam_extractor = None
-    try:
-        cam_extractor_class = {
-            'SmoothGradCAMpp': SmoothGradCAMpp,
-            'ScoreCAM': ScoreCAM,
-            'LayerCAM': LayerCAM
-        }.get(xai_method)
-
-        if not cam_extractor_class:
-            st.error(f"Método XAI '{xai_method}' não suportado.")
-            return
-            
-        cam_extractor = cam_extractor_class(model_copy, target_layer=target_layer)
-
-        with torch.set_grad_enabled(True):
-            out = model_copy(input_tensor)
-            pred_class = out.argmax().item()
-            activation_map = cam_extractor(pred_class, out)
-
-        result = to_pil_image(activation_map[0].squeeze(0).cpu(), mode='F')
-        resized_map = result.resize(image.size, Image.Resampling.BICUBIC)
+    for i, (img_tensor, true, pred) in enumerate(zip(error_images, true_labels, pred_labels)):
+        ax = axes[i]
         
-        map_np = np.array(resized_map)
-        map_np = (map_np - np.min(map_np)) / (np.max(map_np) - np.min(map_np) + 1e-6)
+        # Desnormalização para visualização
+        img_display = img_tensor.permute(1, 2, 0).numpy()
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        img_display = std * img_display + mean
+        img_display = np.clip(img_display, 0, 1)
         
-        heatmap_np = np.uint8(255 * map_np)
-        heatmap = cv2.applyColorMap(heatmap_np, cv2.COLORMAP_JET) # type: ignore
+        ax.imshow(img_display)
+        ax.set_title(f"Real: {true}\nPred: {pred}", fontsize=10)
+        ax.axis('off')
+
+    # Ocultar eixos não utilizados
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
         
-        superimposed_img = np.uint8(cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB) * 0.4 + np.array(image) * 0.6)
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-        ax1.imshow(image); ax1.set_title('Imagem Original'); ax1.axis('off')
-        ax2.imshow(superimposed_img); ax2.set_title(xai_method); ax2.axis('off')
-        st.pyplot(fig)
-    except Exception as e:
-        st.error(f"Erro ao gerar Grad-CAM: {e}")
-    finally:
-        # The new torchcam API handles hooks automatically.
-        # If cam_extractor was created, it will be garbage collected.
-        pass
-
-def main():
-    # --- Session State Initialization ---
-    if 'training_done' not in st.session_state:
-        st.session_state.training_done = False
-        st.session_state.model = None
-        st.session_state.classes = None
-        st.session_state.data_dir = None
-        st.session_state.history = None
-        st.session_state.metrics = None
-
-    if os.path.exists('capa.png'): st.image('capa.png', use_container_width=True)
-    st.title("ODONTO.IA - Bancada de Experimentação")
-    
-    # --- Sidebar for Configuration ---
-    with st.sidebar:
-        if os.path.exists("logo.png"): st.image("logo.png", width=200)
-        st.title("🔬 Configurações do Experimento")
-        
-        st.header("Modelo")
-        model_name = st.selectbox("Arquitetura:", config.AVAILABLE_MODELS, key="model_name")
-        fine_tune = st.checkbox("Fine-Tuning Completo", True, key="fine_tune")
-
-        st.header("Treinamento")
-        epochs = st.slider("Épocas:", 1, 500, config.TRAINING_PARAMS['epochs'], key="epochs")
-        batch_size = st.select_slider("Tamanho do Lote:", [4, 8, 16, 32, 64], config.TRAINING_PARAMS['batch_size'], key="batch_size")
-        
-        st.header("Otimização")
-        optimizer = st.selectbox("Otimizador:", config.AVAILABLE_OPTIMIZERS, key="optimizer")
-        learning_rate = st.select_slider("Taxa de Aprendizagem:", [1e-2, 1e-3, 1e-4, 1e-5], config.TRAINING_PARAMS['learning_rate'], key="lr")
-        scheduler = st.selectbox("Agendador de LR:", config.AVAILABLE_SCHEDULERS, key="scheduler")
-        
-        st.header("Regularização")
-        l1_lambda = st.number_input("Regularização L1 (Lasso):", 0.0, 0.1, 0.0, 0.001, key="l1", format="%.4f")
-        l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2", format="%.4f")
-        dropout_rate = st.slider("Taxa de Dropout:", 0.0, 0.9, 0.5, 0.1, key="dropout")
-        patience = st.number_input("Paciência (Early Stopping):", 1, 20, config.TRAINING_PARAMS['patience'], key="patience")
-        use_weighted_loss = st.checkbox("Usar Perda Ponderada", config.REGULARIZATION_PARAMS['use_weighted_loss'], key="weighted_loss")
-        
-        st.header("Aumento de Dados")
-        augmentation = st.selectbox("Técnica de Aumento:", config.AUGMENTATION_TECHNIQUES, key="augmentation")
-
-    # --- Main App Body ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Treinamento", 
-        "Análise de Clustering", 
-        "Avaliação de Imagem", 
-        "Comparação de Experimentos", 
-        "Análise Técnica da Arquitetura"
-    ])
-
-    with tab1:
-        st.header("1. Fonte de Dados e Início")
-        st.info("Faça o upload de um arquivo ZIP ou use o conjunto de dados local para iniciar o treinamento.")
-        zip_file = st.file_uploader("Upload do arquivo ZIP com imagens", type=["zip"], key="zip_uploader")
-        
-        if st.button("🚀 Iniciar Treinamento"):
-            with st.spinner("Configurando o ambiente e iniciando o treinamento..."):
-                display_environment_info()
-            app_config = {
-                'model_name': model_name, 'fine_tune': fine_tune, 'epochs': epochs,
-                'batch_size': batch_size, 'optimizer': optimizer, 'learning_rate': learning_rate,
-                'scheduler': scheduler, 
-                'l1_lambda': l1_lambda, 'l2_lambda': l2_lambda, 'dropout_rate': dropout_rate,
-                'patience': patience, 'use_weighted_loss': use_weighted_loss, 
-                'augmentation': augmentation, 'train_split': config.TRAINING_PARAMS['train_split']
-            }
-            
-            data_dir = None
-            temp_dir_to_clean = None
-            try:
-                if zip_file:
-                    st.success("Arquivo ZIP detectado! Extraindo conteúdo...")
-                    temp_dir = tempfile.mkdtemp()
-                    temp_dir_to_clean = temp_dir
-                    with zipfile.ZipFile(zip_file, 'r') as z: 
-                        z.extractall(temp_dir)
-                        st.info(f"Arquivo ZIP extraído com sucesso. Conteúdo: {len(z.namelist())} arquivos.")
-                    
-                    # Handle cases where the zip extracts to a subdirectory
-                    extracted_folders = [f for f in os.listdir(temp_dir) if os.path.isdir(os.path.join(temp_dir, f))]
-                    if len(extracted_folders) == 1 and extracted_folders[0] != '__MACOSX':
-                         data_dir = os.path.join(temp_dir, extracted_folders[0])
-                    else:
-                         data_dir = temp_dir
-                else:
-                    data_dir = config.DATASET_PATH
-
-                if os.path.isdir(data_dir):
-                    app_config['data_dir'] = data_dir
-                    st.info(f"Usando diretório de dados: {data_dir}")
-                    train_result = run_training_pipeline(app_config)
-                    if train_result:
-                        st.session_state.model, st.session_state.classes, st.session_state.history, st.session_state.metrics = train_result
-                        st.session_state.training_done = True
-                        st.session_state.data_dir = data_dir
-                        
-                        # Save results
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        if not os.path.exists('results'):
-                            os.makedirs('results')
-                        results_filename = f"results/experiment_{app_config['model_name']}_{timestamp}.json"
-                        results_data = {
-                            "config": app_config,
-                            "history": st.session_state.history,
-                            "metrics": st.session_state.metrics
-                        }
-                        with open(results_filename, 'w') as f:
-                            json.dump(results_data, f, indent=4)
-                        
-                        st.success(f"Experimento concluído! Resultados salvos em `{results_filename}`")
-                        st.balloons()
-                else:
-                    st.error(f"Diretório de dados '{data_dir}' não encontrado.")
-            
-            except Exception as e:
-                st.error(f"Ocorreu um erro: {e}")
-                import traceback
-                st.code(traceback.format_exc())
-            finally:
-                if temp_dir_to_clean: 
-                    try:
-                        shutil.rmtree(temp_dir_to_clean)
-                        st.info("Diretório temporário limpo com sucesso.")
-                    except Exception as e:
-                        st.warning(f"Não foi possível limpar o diretório temporário: {e}")
-
-    with tab2:
-        st.header("2. Análise de Clustering (Embeddings)")
-        if st.button("Analisar Clusters"):
-            if st.session_state.training_done and st.session_state.model and st.session_state.data_dir and st.session_state.classes:
-                with st.spinner("Extraindo features e analisando clusters..."):
-                    model = cast(nn.Module, st.session_state.model)
-                    data_dir = cast(str, st.session_state.data_dir)
-                    classes = cast(List[str], st.session_state.classes)
-
-                    full_dataset = datasets.ImageFolder(root=data_dir, transform=config.test_transforms)
-                    features, labels, paths = extract_features(full_dataset, model, batch_size)
-                    
-                    if features.size > 0:
-                        num_clusters = len(classes)
-                        hierarchical_labels, kmeans_labels = perform_clustering(features, num_clusters)
-                        evaluate_clustering(labels, hierarchical_labels, "Hierárquico")
-                        evaluate_clustering(labels, kmeans_labels, "K-Means")
-                        
-                        # Chamar a nova função de visualização interativa
-                        from utils import plot_interactive_embeddings
-                        plot_interactive_embeddings(features, labels, paths, classes)
-                        
-                        # Manter a visualização antiga como uma opção ou alternativa
-                        with st.expander("Visualização Estática de Clusters (PCA)"):
-                            visualize_clusters(features, labels, hierarchical_labels, kmeans_labels, classes)
-            else:
-                st.warning("Treine um modelo primeiro. Os resultados do treinamento são necessários para esta análise.")
-
-    with tab3:
-        st.header("3. Avaliação e Interpretabilidade (XAI)")
-        if st.session_state.training_done and st.session_state.model and st.session_state.classes:
-            model = cast(nn.Module, st.session_state.model)
-            classes = cast(List[str], st.session_state.classes)
-            
-            xai_method = st.selectbox("Método de Interpretabilidade:", config.AVAILABLE_XAI_METHODS)
-            eval_image_file = st.file_uploader("Upload de imagem para avaliação", type=["png", "jpg", "jpeg"], key="eval_uploader")
-            
-            if eval_image_file:
-                image = Image.open(eval_image_file).convert("RGB")
-                st.image(image, caption='Imagem para avaliação', use_container_width=True)
-    
-                class_name, confidence = evaluate_image(model, image, classes)
-                st.metric(label="Classe Predita", value=class_name, delta=f"Confiança: {confidence:.2%}")
-    
-                # --- Integração Groq LLM ---
-                with st.spinner("Consultando IA Groq para interpretação clínica..."):
-                    try:
-                        interpretacao = interpretar_predicao(class_name)
-                        st.write("**Interpretação clínica (IA Groq):**", interpretacao)
-                    except Exception as e:
-                        st.error(f"Erro ao consultar IA Groq para interpretação: {e}")
-    
-                with st.spinner("Consultando IA Groq para prognóstico..."):
-                    try:
-                        prognostico = gerar_prognostico(class_name)
-                        st.write("**Prognóstico clínico (IA Groq):**", prognostico)
-                    except Exception as e:
-                        st.error(f"Erro ao consultar IA Groq para prognóstico: {e}")
-    
-                visualize_activations(model, image, xai_method)
-    
-                disease_key = get_disease_key(class_name)
-                show_disease_modal(class_name, disease_key)
-        else:
-            st.warning("Treine um modelo primeiro.")
-
-    with tab4:
-        st.header("4. Comparação de Experimentos")
-        
-        # Criar pasta results se não existir
-        if not os.path.exists('results'):
-            os.makedirs('results')
-            
-        results_files = [f for f in os.listdir('results') if f.endswith('.json')]
-        
-        if not results_files:
-            st.info("Nenhum resultado de experimento encontrado. Execute um treinamento para começar.")
-        else:
-            selected_files = st.multiselect("Selecione os experimentos para comparar:", results_files)
-
-            if st.button("🗑️ Apagar Todos os Resultados", help="Clique para remover todos os arquivos .json da pasta de resultados."):
-                try:
-                    for file in results_files:
-                        os.remove(os.path.join('results', file))
-                    st.success("Todos os resultados dos experimentos foram apagados.")
-                    # Força o rerender para atualizar a lista de arquivos
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao apagar os arquivos: {e}")
-            
-            if selected_files:
-                all_results = []
-                for file in selected_files:
-                    with open(os.path.join('results', file), 'r') as f:
-                        all_results.append(json.load(f))
-                
-                # --- Tabela de Comparação ---
-                st.subheader("Resumo das Configurações e Métricas")
-                summary_data = []
-                for res in all_results:
-                    conf = res['config']
-                    met = res['metrics']
-                    summary_data.append({
-                        "Modelo": conf.get('model_name', 'N/A'),
-                        "Otimizador": conf.get('optimizer', 'N/A'),
-                        "LR": conf.get('learning_rate', 'N/A'),
-                        "L1": conf.get('l1_lambda', 'N/A'),
-                        "L2": conf.get('l2_lambda', 'N/A'),
-                        "Dropout": conf.get('dropout_rate', 'N/A'),
-                        "Augmentation": conf.get('augmentation', 'N/A'),
-                        "F1-Score (Macro)": met.get('macro avg', {}).get('f1-score', 0),
-                        "Acurácia": met.get('accuracy', 0)
-                    })
-                st.dataframe(pd.DataFrame(summary_data))
-
-                # --- Gráficos de Comparação ---
-                st.subheader("Curvas de Aprendizagem Comparadas")
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-                
-                for res in all_results:
-                    label = res['config'].get('model_name', 'exp') + "_" + res['config'].get('optimizer', '')
-                    hist = res['history']
-                    epochs = range(1, len(hist['train_loss']) + 1)
-                    ax1.plot(epochs, hist['val_loss'], 'o-', label=f"Val Loss ({label})")
-                    ax2.plot(epochs, hist['val_acc'], 'o-', label=f"Val Acc ({label})")
-
-                ax1.set_title('Perda de Validação')
-                ax1.set_xlabel('Épocas'); ax1.set_ylabel('Perda'); ax1.grid(True); ax1.legend()
-                ax2.set_title('Acurácia de Validação')
-                ax2.set_xlabel('Épocas'); ax2.set_ylabel('Acurácia'); ax2.grid(True); ax2.legend()
-                st.pyplot(fig)
-
-    with tab5:
-        st.header("Análise Técnica da Arquitetura do Modelo")
-        if st.session_state.training_done and st.session_state.model:
-            model_name_used = st.session_state.model.__class__.__name__
-            prompt = (
-                f"Explique de maneira técnica, rigorosa e didática o funcionamento, "
-                f"a metodologia científica, os fundamentos matemáticos e os cálculos envolvidos "
-                f"na arquitetura de rede neural {model_name_used} utilizada para classificação de imagens de lesões bucais. "
-                f"Divida a resposta em tópicos: objetivo, funcionamento, equações matemáticas relevantes, "
-                f"fundamentos estatísticos (como função de perda, otimização, regularização), e explique passo a passo. "
-                f"Inclua exemplos numéricos ou cálculos simples para ilustrar."
-            )
-            with st.spinner("Gerando análise técnica detalhada via IA Groq..."):
-                try:
-                    analise_tecnica = consulta_groq(prompt, temperature=0.3, max_tokens=2048)
-                    st.markdown(analise_tecnica)
-                except Exception as e:
-                    st.error(f"Erro ao consultar IA Groq: {e}")
-                    st.markdown("Não foi possível obter resposta da IA no momento.")
-        else:
-            st.info("Treine um modelo antes para visualizar a análise técnica da arquitetura.")
-
-if __name__ == "__main__":
-    main()
+    st.pyplot(fig)
+    plt.close(fig)
