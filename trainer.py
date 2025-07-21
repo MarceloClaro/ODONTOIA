@@ -48,7 +48,7 @@ from utils import (set_seed, seed_worker, visualize_data,
                    plot_class_distribution, plot_metrics, visualize_augmented_data,
                    display_model_architecture, display_environment_info, interpret_results)
 from models import get_model
-from trainer import train_loop, compute_metrics, error_analysis, get_optimizer, get_scheduler
+
 from llm_modal import show_disease_modal, get_disease_key
 
 # Set seed for reproducibility
