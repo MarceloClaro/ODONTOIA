@@ -6,41 +6,34 @@ import streamlit as st
 def get_model(model_name: str, num_classes: int, fine_tune: bool = True, dropout_rate: float = 0.5):
     """
     Carrega um modelo pré-treinado e o adapta para a tarefa de classificação.
-    
-    Args:
-        model_name (str): Nome do modelo a ser carregado (ex: 'resnet18', 'resnet50').
-        num_classes (int): Número de classes de saída.
-        fine_tune (bool): Se True, descongela todos os pesos para fine-tuning.
-        dropout_rate (float): A taxa de dropout a ser usada na camada de classificação.
-
-    Returns:
-        torch.nn.Module: O modelo adaptado.
+    Versão atualizada com suporte a ResNet18 e insensível a maiúsculas/minúsculas.
     """
     try:
-        model = None
-        # Seleciona o modelo com base no nome
-        if model_name == 'resnet18':
+        # Converte o nome do modelo para minúsculas para comparação insensível a maiúsculas
+        model_name_lower = model_name.lower()
+        
+        if model_name_lower == 'resnet18':
             model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
             num_ftrs = model.fc.in_features
             model.fc = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(num_ftrs, num_classes)
             )
-        elif model_name == 'resnet50':
+        elif model_name_lower == 'resnet50':
             model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
             num_ftrs = model.fc.in_features
             model.fc = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(num_ftrs, num_classes)
             )
-        elif model_name == 'densenet121':
+        elif model_name_lower == 'densenet121':
             model = models.densenet121(weights=models.DenseNet121_Weights.DEFAULT)
             num_ftrs = model.classifier.in_features
             model.classifier = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
                 nn.Linear(num_ftrs, num_classes)
             )
-        elif model_name == 'efficientnet_b0':
+        elif model_name_lower == 'efficientnet_b0':
             model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
             num_ftrs = model.classifier[1].in_features
             model.classifier = nn.Sequential(
