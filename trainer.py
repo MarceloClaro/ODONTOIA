@@ -10,9 +10,72 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import copy
 from tqdm.auto import tqdm
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import streamlit as st
+
+# Import optional optimizers
+try:
+    from torch_optimizer import Ranger
+    RANGER_AVAILABLE = True
+except ImportError:
+    RANGER_AVAILABLE = False
+    
+try:
+    from lion_pytorch import Lion
+    LION_AVAILABLE = True
+except ImportError:
+    LION_AVAILABLE = False
 
 import config
+
+def apply_mixup(inputs: torch.Tensor, labels: torch.Tensor, alpha: float = 0.4):
+    """Apply Mixup data augmentation."""
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+
+    batch_size = inputs.size(0)
+    index = torch.randperm(batch_size).to(inputs.device)
+
+    mixed_inputs = lam * inputs + (1 - lam) * inputs[index, :]
+    labels_a, labels_b = labels, labels[index]
+    return mixed_inputs, (labels_a, labels_b, lam)
+
+def apply_cutmix(inputs: torch.Tensor, labels: torch.Tensor, alpha: float = 1.0):
+    """Apply CutMix data augmentation."""
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+
+    batch_size = inputs.size(0)
+    index = torch.randperm(batch_size).to(inputs.device)
+
+    # Generate random bounding box
+    _, _, h, w = inputs.shape
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = int(w * cut_rat)
+    cut_h = int(h * cut_rat)
+
+    # Uniform sampling
+    cx = np.random.randint(w)
+    cy = np.random.randint(h)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, w)
+    bby1 = np.clip(cy - cut_h // 2, 0, h)
+    bbx2 = np.clip(cx + cut_w // 2, 0, w)
+    bby2 = np.clip(cy + cut_h // 2, 0, h)
+
+    # Apply cutmix
+    mixed_inputs = inputs.clone()
+    mixed_inputs[:, :, bby1:bby2, bbx1:bbx2] = inputs[index, :, bby1:bby2, bbx1:bbx2]
+
+    # Adjust lambda to exactly match pixel ratio
+    lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (w * h))
+    
+    labels_a, labels_b = labels, labels[index]
+    return mixed_inputs, (labels_a, labels_b, lam)
 
 def get_optimizer(model: nn.Module, optimizer_name: str, learning_rate: float, l2_lambda: float) -> torch.optim.Optimizer:
     """Cria um otimizador para o modelo."""
@@ -22,19 +85,26 @@ def get_optimizer(model: nn.Module, optimizer_name: str, learning_rate: float, l
         return AdamW(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     elif optimizer_name == 'SGD':
         return SGD(model.parameters(), lr=learning_rate, weight_decay=l2_lambda, momentum=0.9)
-    # Adicione aqui outros otimizadores como 'Ranger' ou 'Lion' se necessário
-    # Exemplo:
-    # from lion_pytorch import Lion
-    # if optimizer_name == 'Lion':
-    #     return Lion(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+    elif optimizer_name == 'Ranger':
+        if not RANGER_AVAILABLE:
+            st.warning("Ranger optimizer not available. Install with: pip install torch-optimizer. Falling back to AdamW.")
+            return AdamW(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+        return Ranger(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+    elif optimizer_name == 'Lion':
+        if not LION_AVAILABLE:
+            st.warning("Lion optimizer not available. Install with: pip install lion-pytorch. Falling back to AdamW.")
+            return AdamW(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
+        return Lion(model.parameters(), lr=learning_rate, weight_decay=l2_lambda)
     else:
         raise ValueError(f"Otimizador '{optimizer_name}' não suportado.")
 
-def get_scheduler(optimizer: torch.optim.Optimizer, scheduler_name: str, epochs: int, steps_per_epoch: int, learning_rate: float) -> torch.optim.lr_scheduler._LRScheduler:
+def get_scheduler(optimizer: torch.optim.Optimizer, scheduler_name: str, epochs: int, steps_per_epoch: int) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
     """Cria um agendador de taxa de aprendizado (learning rate scheduler)."""
     if scheduler_name == 'CosineAnnealingLR':
         return CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     elif scheduler_name == 'OneCycleLR':
+        # Get the learning rate from the optimizer
+        learning_rate = optimizer.param_groups[0]['lr']
         return OneCycleLR(optimizer, max_lr=learning_rate, steps_per_epoch=steps_per_epoch, epochs=epochs)
     elif scheduler_name == 'Nenhum':
         return None
@@ -42,14 +112,18 @@ def get_scheduler(optimizer: torch.optim.Optimizer, scheduler_name: str, epochs:
         raise ValueError(f"Agendador '{scheduler_name}' não suportado.")
 
 def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoader,
-               criterion: nn.Module, optimizer: torch.optim.Optimizer, scheduler: Any,
-               epochs: int, patience: int, device: str, l1_lambda: float = 0.0,
-               status_placeholder=None):
+               criterion: nn.Module, optimizer: torch.optim.Optimizer, scheduler: Optional[Any],
+               epochs: int, patience: int, augmentation: str = 'Nenhum', l1_lambda: float = 0.0):
     """Loop principal de treinamento do modelo."""
+    device = config.DEVICE
     best_val_loss = float('inf')
     best_model_wts = copy.deepcopy(model.state_dict())
     epochs_no_improve = 0
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+    
+    # Show augmentation strategy being used
+    if augmentation != 'Nenhum':
+        st.info(f"Usando estratégia de aumento de dados: {augmentation}")
 
     for epoch in range(epochs):
         # Fase de treino
@@ -58,10 +132,24 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
         train_pbar = tqdm(train_loader, desc=f"Época {epoch+1}/{epochs} [Treino]", leave=False)
         for batch in train_pbar:
             inputs, labels = batch['image'].to(device), batch['label'].to(device)
+            
+            # Apply Mixup or Cutmix if selected
+            if augmentation == 'Mixup':
+                inputs, labels = apply_mixup(inputs, labels, alpha=config.AUGMENTATION_PARAMS['mixup_alpha'])
+            elif augmentation == 'Cutmix':
+                inputs, labels = apply_cutmix(inputs, labels, alpha=config.AUGMENTATION_PARAMS['cutmix_alpha'])
+            
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
+            
+            # Handle mixed labels for Mixup/Cutmix
+            if augmentation in ['Mixup', 'Cutmix'] and isinstance(labels, tuple):
+                labels_a, labels_b, lam = labels
+                loss = lam * criterion(outputs, labels_a) + (1 - lam) * criterion(outputs, labels_b)
+            else:
+                loss = criterion(outputs, labels)
 
+            # Add L1 regularization if specified
             if l1_lambda > 0:
                 l1_norm = sum(p.abs().sum() for p in model.parameters())
                 loss += l1_lambda * l1_norm
@@ -73,10 +161,18 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
 
             train_loss += loss.item() * inputs.size(0)
             _, preds = torch.max(outputs, 1)
-            train_corrects += torch.sum(preds == labels.data)
+            
+            # Calculate accuracy correctly for mixed labels
+            if augmentation in ['Mixup', 'Cutmix'] and isinstance(labels, tuple):
+                labels_a, labels_b, lam = labels
+                train_corrects += (lam * preds.eq(labels_a).sum().float() + 
+                                 (1 - lam) * preds.eq(labels_b).sum().float())
+            else:
+                train_corrects += torch.sum(preds == labels.data)
+            
             train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
-        if scheduler and not isinstance(scheduler, OneCycleLR):
+        if scheduler and not isinstance(scheduler, OneCycleLR) and scheduler is not None:
             scheduler.step()
 
         # Fase de validação
@@ -102,8 +198,7 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc.item())
 
-        if status_placeholder:
-            status_placeholder.text(f"Época {epoch+1}/{epochs} | Perda Val: {val_loss:.4f} | Acerto Val: {val_acc:.2%}")
+        print(f"Época {epoch+1}/{epochs} | Perda Val: {val_loss:.4f} | Acerto Val: {val_acc:.2%}")
 
         # Early Stopping
         if val_loss < best_val_loss:
@@ -115,14 +210,13 @@ def train_loop(model: nn.Module, train_loader: DataLoader, valid_loader: DataLoa
 
         if epochs_no_improve >= patience:
             print(f"Parada antecipada na época {epoch+1}")
-            if status_placeholder:
-                status_placeholder.warning(f"Parada antecipada na época {epoch+1}")
             break
 
     return {"weights": best_model_wts, "history": history}
 
-def compute_metrics(model: nn.Module, dataloader: DataLoader, classes: List[str], device: str) -> Dict[str, Any]:
+def compute_metrics(model: nn.Module, dataloader: DataLoader, classes: List[str]) -> Dict[str, Any]:
     """Calcula as métricas de classificação e retorna o relatório e a figura da matriz de confusão."""
+    device = config.DEVICE
     model.eval()
     all_preds, all_labels = [], []
     with torch.no_grad():
@@ -141,11 +235,15 @@ def compute_metrics(model: nn.Module, dataloader: DataLoader, classes: List[str]
     ax.set_xlabel('Predito')
     ax.set_ylabel('Verdadeiro')
     ax.set_title('Matriz de Confusão')
+    
+    st.pyplot(fig)
+    plt.close(fig)
 
-    return {"report": report, "figure": fig}
+    return report
 
-def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str], device: str):
+def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str]):
     """Encontra imagens classificadas incorretamente e retorna uma figura para visualização."""
+    device = config.DEVICE
     model.eval()
     error_images, true_labels, pred_labels = [], [], []
 
@@ -163,16 +261,20 @@ def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str],
                 pred_labels.append(classes[preds[idx].item()])
 
     if not error_images:
-        return None
+        st.info("Nenhum erro de classificação encontrado no conjunto de teste!")
+        return
 
     num_cols = 5
-    num_rows = (len(error_images) + num_cols - 1) // num_cols
+    num_rows = min(4, (len(error_images) + num_cols - 1) // num_cols)  # Limit to 4 rows max
+    num_display = min(len(error_images), num_rows * num_cols)
+    
     fig, axes = plt.subplots(num_rows, num_cols, figsize=(15, 3 * num_rows))
     if not isinstance(axes, np.ndarray):
         axes = np.array([axes])
     axes = axes.flatten()
 
-    for i, (img_tensor, true, pred) in enumerate(zip(error_images, true_labels, pred_labels)):
+    for i in range(num_display):
+        img_tensor, true, pred = error_images[i], true_labels[i], pred_labels[i]
         ax = axes[i]
         img_display = img_tensor.permute(1, 2, 0).numpy()
         mean = np.array([0.485, 0.456, 0.406])
@@ -183,7 +285,8 @@ def error_analysis(model: nn.Module, dataloader: DataLoader, classes: List[str],
         ax.set_title(f"Verdadeiro: {true}\nPredito: {pred}", fontsize=10)
         ax.axis('off')
 
-    for j in range(i + 1, len(axes)):
+    for j in range(num_display, len(axes)):
         axes[j].axis('off')
 
-    return fig
+    st.pyplot(fig)
+    plt.close(fig)
