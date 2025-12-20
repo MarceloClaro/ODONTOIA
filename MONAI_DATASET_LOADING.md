@@ -90,7 +90,7 @@ DEBUG: Classes encontradas (7): ['CaS', 'CoS', 'Gum', 'MC', 'OC', 'OLP', 'OT']
 
 DEBUG: Mapeamento de classes: {'CaS': 0, 'CoS': 1, 'Gum': 2, 'MC': 3, 'OC': 4, 'OLP': 5, 'OT': 6}
 
-DEBUG: Total de arquivos de treino: 407, Validação: 48, Teste: 54
+DEBUG: Total de arquivos - Treino: 407, Validação: 48, Teste: 54
 
 Shape do tensor de imagem do MONAI: torch.Size([1, 3, 224, 224])
 
