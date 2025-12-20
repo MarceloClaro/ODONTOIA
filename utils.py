@@ -9,14 +9,63 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from typing import List, Dict, Any, cast, Optional
+import os
+from typing import List, Dict, Any, cast, Optional, Tuple
 from torchvision.datasets import ImageFolder
 from matplotlib.patches import Rectangle
-from typing import cast
 import torchvision
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from PIL import Image, ImageEnhance
+
+# Valid image extensions for dataset loading
+VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+
+def select_rgb_channels(image: torch.Tensor) -> torch.Tensor:
+    """
+    Select only the first 3 channels (RGB) from an image tensor.
+    
+    Args:
+        image: Image tensor with shape (C, H, W)
+    
+    Returns:
+        Image tensor with only RGB channels (3, H, W)
+    """
+    return image[:3, :, :] if image.shape[0] > 3 else image
+
+
+def discover_image_files(directory: str, classes: List[str], class_to_idx: Dict[str, int]) -> Tuple[List[str], List[int]]:
+    """
+    Discover image files in a directory organized by class folders.
+    
+    Args:
+        directory: Root directory path
+        classes: List of class names
+        class_to_idx: Dictionary mapping class names to indices
+    
+    Returns:
+        Tuple of (file_paths, labels)
+    """
+    files, labels = [], []
+    for target_class in classes:
+        class_dir = os.path.join(directory, target_class)
+        if not os.path.isdir(class_dir):
+            continue
+        
+        try:
+            for fname in os.listdir(class_dir):
+                # Filter only valid image files
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in VALID_IMAGE_EXTENSIONS:
+                    files.append(os.path.join(class_dir, fname))
+                    labels.append(class_to_idx[target_class])
+        except PermissionError:
+            print(f"Warning: Permission denied accessing directory: {class_dir}")
+            continue
+    
+    return files, labels
+
 
 def set_seed(seed: int):
     """Set seed for reproducibility."""

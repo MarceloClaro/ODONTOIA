@@ -49,7 +49,8 @@ import config
 from utils import (set_seed, seed_worker, visualize_data,
                    plot_class_distribution, plot_metrics, visualize_augmented_data,
                    display_model_architecture, display_environment_info, interpret_results,
-                   EnhancedImagePreprocessor, get_augmentation_transforms)
+                   EnhancedImagePreprocessor, get_augmentation_transforms,
+                   select_rgb_channels, discover_image_files, VALID_IMAGE_EXTENSIONS)
 from models import get_model
 from trainer import train_loop, compute_metrics, error_analysis, get_optimizer, get_scheduler
 from llm_modal import show_disease_modal, get_disease_key
@@ -82,7 +83,7 @@ def run_training_pipeline(app_config):
         train_transforms_list = [
             LoadImaged(keys=["image"]),
             EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            Lambdad(keys="image", func=select_rgb_channels),
             ScaleIntensityd(keys=["image"]),
             Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
             EnsureTyped(keys=["image"], dtype=torch.float32),
@@ -101,36 +102,20 @@ def run_training_pipeline(app_config):
         val_transform = Compose([
             LoadImaged(keys=["image"]),
             EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            Lambdad(keys="image", func=select_rgb_channels),
             ScaleIntensityd(keys=["image"]),
             Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
             EnsureTyped(keys=["image"], dtype=torch.float32),
         ])
 
         # Discover classes and create file lists
-        train_files, train_labels, classes = [], [], sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
+        classes = sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
-        for target_class in classes:
-            class_dir = os.path.join(config.TRAIN_DIR, target_class)
-            for fname in os.listdir(class_dir):
-                train_files.append(os.path.join(class_dir, fname))
-                train_labels.append(class_to_idx[target_class])
-
-        valid_files, valid_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.VALID_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    valid_files.append(os.path.join(class_dir, fname))
-                    valid_labels.append(class_to_idx[target_class])
-
-        test_files, test_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.TEST_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    test_files.append(os.path.join(class_dir, fname))
-                    test_labels.append(class_to_idx[target_class])
+        
+        # Discover files for each split using utility function
+        train_files, train_labels = discover_image_files(config.TRAIN_DIR, classes, class_to_idx)
+        valid_files, valid_labels = discover_image_files(config.VALID_DIR, classes, class_to_idx)
+        test_files, test_labels = discover_image_files(config.TEST_DIR, classes, class_to_idx)
 
         num_classes = len(classes)
 
