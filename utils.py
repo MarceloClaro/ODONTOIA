@@ -13,7 +13,6 @@ import os
 from typing import List, Dict, Any, cast, Optional, Tuple
 from torchvision.datasets import ImageFolder
 from matplotlib.patches import Rectangle
-from typing import cast
 import torchvision
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -23,7 +22,7 @@ from PIL import Image, ImageEnhance
 VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
 
 
-def select_rgb_channels(image):
+def select_rgb_channels(image: torch.Tensor) -> torch.Tensor:
     """
     Select only the first 3 channels (RGB) from an image tensor.
     
