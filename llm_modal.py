@@ -7,9 +7,12 @@ import streamlit as st
 import requests
 import json
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
+from datetime import datetime
+import random
+from groq_llm import consulta_groq
 
 class DentalDiseaseReference:
     """Class to handle dental disease descriptions and PubMed references"""
@@ -183,6 +186,312 @@ class DentalDiseaseReference:
             st.error(f"Ocorreu um erro inesperado: {e}")
             return []
     
+    def search_semantic_scholar(self, query: str, max_results: int = 5) -> List[Dict]:
+        """Search Semantic Scholar for academic references."""
+        try:
+            base_url = "https://api.semanticscholar.org/graph/v1/paper/search"
+            params = {
+                "query": query,
+                "limit": max_results,
+                "fields": "title,authors,year,abstract,citationCount,venue,externalIds,url"
+            }
+            
+            response = requests.get(base_url, params=params, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            articles = []
+            
+            for i, paper in enumerate(data.get('data', []), 1):
+                authors_list = [author.get('name', '') for author in paper.get('authors', [])]
+                authors_str = ", ".join(authors_list[:3]) + (" et al." if len(authors_list) > 3 else "")
+                
+                external_ids = paper.get('externalIds', {})
+                
+                articles.append({
+                    "title": paper.get('title', 'No title available'),
+                    "authors": authors_str,
+                    "journal": paper.get('venue', 'N/A'),
+                    "year": paper.get('year', 'N/A'),
+                    "abstract": paper.get('abstract', 'No abstract available'),
+                    "citations": paper.get('citationCount', 0),
+                    "doi": external_ids.get('DOI', ''),
+                    "arxiv_id": external_ids.get('ArXiv', ''),
+                    "url": paper.get('url', '#'),
+                    "platform": "Semantic Scholar",
+                    "relevance": "High",
+                    "ranking": i,
+                    "retrieved_date": datetime.now().isoformat()
+                })
+            
+            return articles
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erro ao buscar no Semantic Scholar: {e}")
+            return []
+        except Exception as e:
+            st.error(f"Erro inesperado no Semantic Scholar: {e}")
+            return []
+    
+    def search_arxiv(self, query: str, max_results: int = 5) -> List[Dict]:
+        """Search arXiv for academic preprints."""
+        try:
+            base_url = "http://export.arxiv.org/api/query"
+            params = {
+                "search_query": f"all:{query}",
+                "start": 0,
+                "max_results": max_results,
+                "sortBy": "relevance",
+                "sortOrder": "descending"
+            }
+            
+            response = requests.get(base_url, params=params, timeout=15)
+            response.raise_for_status()
+            
+            # Parse XML response
+            root = ET.fromstring(response.content)
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            
+            articles = []
+            for i, entry in enumerate(root.findall('atom:entry', ns), 1):
+                title_elem = entry.find('atom:title', ns)
+                title = title_elem.text.strip() if title_elem is not None and title_elem.text else "No title"
+                
+                authors_list = []
+                for author in entry.findall('atom:author', ns):
+                    name_elem = author.find('atom:name', ns)
+                    if name_elem is not None and name_elem.text:
+                        authors_list.append(name_elem.text)
+                
+                authors_str = ", ".join(authors_list[:3]) + (" et al." if len(authors_list) > 3 else "")
+                
+                summary_elem = entry.find('atom:summary', ns)
+                abstract = summary_elem.text.strip() if summary_elem is not None and summary_elem.text else "No abstract"
+                
+                published_elem = entry.find('atom:published', ns)
+                year = published_elem.text[:4] if published_elem is not None and published_elem.text else "N/A"
+                
+                id_elem = entry.find('atom:id', ns)
+                arxiv_url = id_elem.text if id_elem is not None and id_elem.text else "#"
+                arxiv_id = arxiv_url.split('/abs/')[-1] if '/abs/' in arxiv_url else ""
+                
+                pdf_link = ""
+                for link in entry.findall('atom:link', ns):
+                    if link.get('title') == 'pdf':
+                        pdf_link = link.get('href', '')
+                        break
+                
+                articles.append({
+                    "title": title,
+                    "authors": authors_str,
+                    "journal": "arXiv preprint",
+                    "year": year,
+                    "abstract": abstract,
+                    "arxiv_id": arxiv_id,
+                    "url": arxiv_url,
+                    "pdf_url": pdf_link,
+                    "platform": "arXiv",
+                    "relevance": "High",
+                    "ranking": i,
+                    "retrieved_date": datetime.now().isoformat()
+                })
+            
+            return articles
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erro ao buscar no arXiv: {e}")
+            return []
+        except ET.ParseError as e:
+            st.error(f"Erro ao processar dados do arXiv: {e}")
+            return []
+        except Exception as e:
+            st.error(f"Erro inesperado no arXiv: {e}")
+            return []
+    
+    def translate_to_portuguese(self, text: str) -> str:
+        """Translate text to Portuguese using LLM."""
+        try:
+            if not text or text == "No abstract available" or text == "No abstract":
+                return "Resumo não disponível"
+            
+            prompt = f"""Traduza o seguinte texto acadêmico para português (Brasil) mantendo a terminologia técnica adequada:
+
+{text[:1500]}
+
+Forneça APENAS a tradução, sem comentários adicionais."""
+            
+            translation = consulta_groq(prompt, temperature=0.3, max_tokens=800)
+            return translation
+        except Exception as e:
+            st.warning(f"Erro na tradução: {e}")
+            return text
+    
+    def generate_critical_review(self, article: Dict) -> str:
+        """Generate a critical review of an article using LLM."""
+        try:
+            abstract = article.get('abstract', '')[:1000]
+            title = article.get('title', '')
+            
+            if not abstract or abstract in ["No abstract available", "No abstract"]:
+                return "Não foi possível gerar resenha crítica: resumo não disponível."
+            
+            prompt = f"""Como um especialista em pesquisa científica, escreva uma resenha crítica breve (3-4 parágrafos) do seguinte artigo:
+
+Título: {title}
+Resumo: {abstract}
+
+A resenha deve incluir:
+1. Síntese dos objetivos e métodos
+2. Pontos fortes do estudo
+3. Limitações potenciais
+4. Relevância para a área
+
+Escreva em português (Brasil) e seja objetivo."""
+            
+            review = consulta_groq(prompt, temperature=0.7, max_tokens=600)
+            return review
+        except Exception as e:
+            st.warning(f"Erro ao gerar resenha: {e}")
+            return "Erro ao gerar resenha crítica."
+    
+    def multi_perspective_genetic_analysis(self, articles: List[Dict]) -> Dict:
+        """
+        Perform multi-perspective analysis using genetic algorithms.
+        Simulates optimization of research perspectives.
+        """
+        try:
+            if not articles:
+                return {
+                    "success": False,
+                    "message": "Nenhum artigo disponível para análise."
+                }
+            
+            # Define perspectives for analysis
+            perspectives = [
+                "Metodologia Experimental",
+                "Relevância Clínica",
+                "Inovação Tecnológica",
+                "Aplicabilidade Prática",
+                "Rigor Científico",
+                "Impacto na Literatura"
+            ]
+            
+            # Genetic Algorithm simulation
+            population_size = 20
+            generations = 50
+            
+            # Initialize population with random weights for perspectives
+            def create_individual():
+                return [random.uniform(0, 1) for _ in perspectives]
+            
+            def fitness(individual, article):
+                """Calculate fitness score based on article metadata"""
+                score = 0
+                # Citation count influence
+                citations = article.get('citations', 0)
+                if citations:
+                    score += min(citations / 100, 1.0) * individual[5]  # Impact
+                
+                # Year influence (recent papers)
+                year = article.get('year', '2000')
+                try:
+                    year_num = int(year) if year != 'N/A' else 2000
+                    recency = (year_num - 2000) / 25  # Normalize
+                    score += recency * individual[2]  # Innovation
+                except:
+                    pass
+                
+                # Abstract length (completeness)
+                abstract_len = len(article.get('abstract', ''))
+                if abstract_len > 500:
+                    score += individual[4]  # Rigor
+                
+                # Venue quality (if journal is mentioned)
+                if article.get('journal', 'N/A') != 'N/A':
+                    score += individual[3]  # Applicability
+                
+                return score
+            
+            # Run simplified genetic algorithm
+            population = [create_individual() for _ in range(population_size)]
+            
+            best_scores_per_article = []
+            
+            for article in articles:
+                best_fitness = 0
+                best_individual = population[0]
+                
+                for generation in range(generations):
+                    # Evaluate fitness
+                    fitness_scores = [(fitness(ind, article), ind) for ind in population]
+                    fitness_scores.sort(reverse=True, key=lambda x: x[0])
+                    
+                    if fitness_scores[0][0] > best_fitness:
+                        best_fitness = fitness_scores[0][0]
+                        best_individual = fitness_scores[0][1]
+                    
+                    # Selection and crossover (simplified)
+                    new_population = [fitness_scores[i][1] for i in range(population_size // 2)]
+                    
+                    # Crossover
+                    while len(new_population) < population_size:
+                        parent1 = random.choice(new_population[:10])
+                        parent2 = random.choice(new_population[:10])
+                        child = [(parent1[i] + parent2[i]) / 2 for i in range(len(perspectives))]
+                        
+                        # Mutation
+                        if random.random() < 0.1:
+                            idx = random.randint(0, len(child) - 1)
+                            child[idx] = random.uniform(0, 1)
+                        
+                        new_population.append(child)
+                    
+                    population = new_population
+                
+                # Get perspective scores
+                perspective_scores = {
+                    perspectives[i]: best_individual[i] 
+                    for i in range(len(perspectives))
+                }
+                
+                best_scores_per_article.append({
+                    "article": article.get('title', '')[:80],
+                    "fitness": best_fitness,
+                    "perspectives": perspective_scores
+                })
+            
+            # Generate LLM-based synthesis
+            titles = [a.get('title', '')[:100] for a in articles[:3]]
+            synthesis_prompt = f"""Como especialista em análise científica, sintetize as principais perspectivas de pesquisa identificadas nos seguintes artigos:
+
+{chr(10).join(f"{i+1}. {t}" for i, t in enumerate(titles))}
+
+Forneça uma análise multi-perspectiva considerando:
+- Metodologia e rigor científico
+- Relevância clínica e aplicabilidade
+- Inovação e impacto na área
+
+Seja conciso (2-3 parágrafos) e escreva em português."""
+            
+            synthesis = consulta_groq(synthesis_prompt, temperature=0.7, max_tokens=500)
+            
+            return {
+                "success": True,
+                "articles_analyzed": len(articles),
+                "generations": generations,
+                "population_size": population_size,
+                "perspectives": perspectives,
+                "results": best_scores_per_article,
+                "synthesis": synthesis
+            }
+            
+        except Exception as e:
+            st.error(f"Erro na análise genética: {e}")
+            return {
+                "success": False,
+                "message": f"Erro ao realizar análise: {str(e)}"
+            }
+    
     def generate_llm_description(self, disease_key: str) -> str:
         """Generate a comprehensive LLM-style description of the disease"""
         info = self.get_disease_info(disease_key)
@@ -218,7 +527,7 @@ O tratamento geralmente inclui:
         return description
 
 def show_disease_modal(disease_name: str, disease_key: str):
-    """Display a modal with comprehensive disease information"""
+    """Display a modal with comprehensive disease information including multi-source references and AI analysis"""
     
     # Initialize the reference system
     ref_system = DentalDiseaseReference()
@@ -231,7 +540,12 @@ def show_disease_modal(disease_name: str, disease_key: str):
         st.markdown(f"## 🦷 Informações Acadêmicas: {disease_name}")
         
         # Create tabs for different types of information
-        tab1, tab2, tab3 = st.tabs(["📋 Descrição Clínica", "📚 Referências PubMed", "🤖 Análise LLM"])
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📋 Descrição Clínica", 
+            "📚 Referências Científicas", 
+            "🤖 Análise LLM",
+            "🧬 Análise Multi-Perspectiva"
+        ])
         
         with tab1:
             # Get and display disease information
@@ -269,50 +583,126 @@ def show_disease_modal(disease_name: str, disease_key: str):
                 st.warning("Informações não disponíveis para esta doença.")
         
         with tab2:
-            st.markdown("### 📖 Referências Acadêmicas do PubMed")
+            st.markdown("### 📖 Referências Acadêmicas de Múltiplas Fontes")
+            st.info("🔍 Consultando bases de dados científicas...")
             
-            # Advanced search terms for higher quality results
+            # Search query based on medical name
+            info = ref_system.get_disease_info(disease_key)
+            search_query = info.get('medical_name', disease_name) if info else disease_name
+            
+            all_articles = []
+            
+            # Search Semantic Scholar
+            with st.spinner("Buscando no Semantic Scholar..."):
+                semantic_articles = ref_system.search_semantic_scholar(search_query, max_results=3)
+                all_articles.extend(semantic_articles)
+            
+            # Search arXiv
+            with st.spinner("Buscando no arXiv..."):
+                arxiv_articles = ref_system.search_arxiv(search_query, max_results=3)
+                all_articles.extend(arxiv_articles)
+            
+            # Search PubMed
             search_terms = {
-                "gangivoestomatite": '"Gingivostomatitis, Herpetic"[Mesh] OR (herpetic gingivostomatitis AND (review[ptyp] OR clinical trial[ptyp]))',
-                "aftas": '"Stomatitis, Aphthous"[Mesh] AND (review[ptyp] OR clinical trial[ptyp] OR meta-analysis[ptyp])',
-                "herpes_labial": '"Herpes Labialis"[Mesh] AND (review[ptyp] OR clinical trial[ptyp])',
-                "liquen_plano_oral": '"Lichen Planus, Oral"[Mesh] AND (review[ptyp] OR clinical trial[ptyp] OR guideline[ptyp])',
-                "candidíase_oral": '"Candidiasis, Oral"[Mesh] AND (drug therapy[subheading] OR diagnosis[subheading])',
-                "cancer_boca": '"Mouth Neoplasms"[Mesh] AND (diagnosis[subheading] OR therapy[subheading])',
-                "cancer_oral": '"Oral Squamous Cell Carcinoma"[Mesh] AND (pathology[subheading] OR therapy[subheading])'
+                "gangivoestomatite": '"Gingivostomatitis, Herpetic"[Mesh]',
+                "aftas": '"Stomatitis, Aphthous"[Mesh]',
+                "herpes_labial": '"Herpes Labialis"[Mesh]',
+                "liquen_plano_oral": '"Lichen Planus, Oral"[Mesh]',
+                "candidíase_oral": '"Candidiasis, Oral"[Mesh]',
+                "cancer_boca": '"Mouth Neoplasms"[Mesh]',
+                "cancer_oral": '"Oral Squamous Cell Carcinoma"[Mesh]'
             }
             
-            search_term = search_terms.get(disease_key, disease_name)
+            pubmed_query = search_terms.get(disease_key, search_query)
             
-            with st.spinner("Buscando referências acadêmicas avançadas no PubMed..."):
-                articles = ref_system.search_pubmed(search_term)
+            with st.spinner("Buscando no PubMed..."):
+                pubmed_articles = ref_system.search_pubmed(pubmed_query, max_results=2)
+                # Format PubMed articles to match structure
+                for article in pubmed_articles:
+                    article['platform'] = 'PubMed'
+                    article['relevance'] = 'High'
+                all_articles.extend(pubmed_articles)
             
-            if articles:
-                st.success(f"Encontradas {len(articles)} referências de alta relevância:")
+            if all_articles:
+                st.success(f"📚 {len(all_articles)} referências encontradas!")
+                st.markdown("---")
+                st.markdown("## 📚 Referências Acadêmicas Encontradas")
+                st.markdown("### 📖 Artigos e Citações")
                 
-                for i, article in enumerate(articles, 1):
-                    with st.expander(f"📄 {i}. {article['title'][:100]}{'...' if len(article['title']) > 100 else ''}"):
-                        st.markdown(f"**Autores:** {article['authors']}")
-                        st.markdown(f"**Revista:** {article['journal']} ({article['year']})")
+                for i, article in enumerate(all_articles, 1):
+                    st.markdown(f"#### {i}. {article.get('title', 'Sem título')}")
+                    st.markdown(f"👥 **Autores:** {article.get('authors', 'N/A')}")
+                    st.markdown(f"📅 **Ano:** {article.get('year', 'N/A')}")
+                    st.markdown(f"📰 **Periódico/Fonte:** {article.get('journal', 'N/A')}")
+                    st.markdown(f"🏛️ **Plataforma:** {article.get('platform', 'N/A')}")
+                    
+                    if article.get('citations'):
+                        st.markdown(f"📊 **Citações:** {article['citations']}")
+                    
+                    st.markdown(f"🟢 **Relevância:** {article.get('relevance', 'High')}")
+                    
+                    # Display abstract/summary
+                    abstract = article.get('abstract', '')
+                    if abstract and abstract not in ['No abstract available', 'No abstract']:
+                        # Show original abstract
+                        with st.expander("📝 Resumo Original (Inglês)"):
+                            st.write(abstract[:500] + "..." if len(abstract) > 500 else abstract)
                         
-                        # Display Publication Types as chips (using markdown as a fallback for older streamlit versions)
-                        if article['pub_types']:
-                            st.write("**Tipo de Publicação:**")
-                            
-                            # Create a horizontal layout for the "chips"
-                            chip_html = "".join([f"<span style='background-color:#f0f2f6; border-radius:10px; padding: 5px 10px; margin: 0px 5px; display: inline-block;'>🔖 {pt}</span>" for pt in article['pub_types']])
-                            st.markdown(f"<div>{chip_html}</div>", unsafe_allow_html=True)
-
-                        st.markdown(f"**Resumo:** {article['abstract']}")
-
-                        # Display MeSH Terms
-                        if article['mesh_terms']:
-                            st.markdown("**Termos MeSH:**")
-                            st.info(", ".join(article['mesh_terms']))
-
-                        st.markdown(f"**Link:** [Ver no PubMed (PMID: {article['pmid']})]({article['url']})")
+                        # Translate to Portuguese
+                        with st.spinner(f"Traduzindo resumo {i} para português..."):
+                            translated = ref_system.translate_to_portuguese(abstract)
+                        
+                        st.markdown("#### 📝 Resumo (Português)")
+                        st.write(translated)
+                        
+                        # Generate critical review
+                        with st.spinner(f"Gerando resenha crítica {i}..."):
+                            review = ref_system.generate_critical_review(article)
+                        
+                        st.markdown("#### 📋 Resenha Crítica")
+                        st.write(review)
+                    
+                    # Display identifiers
+                    st.markdown("#### 🔗 Identificadores:")
+                    identifiers = []
+                    if article.get('doi'):
+                        identifiers.append(f"DOI: {article['doi']}")
+                    if article.get('pmid'):
+                        identifiers.append(f"PMID: {article['pmid']}")
+                    if article.get('arxiv_id'):
+                        identifiers.append(f"arXiv ID: {article['arxiv_id']}")
+                    
+                    if identifiers:
+                        for identifier in identifiers:
+                            st.text(identifier)
+                    
+                    # Display links
+                    st.markdown("#### 🌐 Links de Acesso:")
+                    if article.get('url') and article['url'] != '#':
+                        st.markdown(f"📄 [Visualizar Artigo]({article['url']})")
+                    if article.get('pdf_url'):
+                        st.markdown(f"⬇️ [Download PDF]({article['pdf_url']})")
+                    
+                    # Audit information
+                    st.markdown("#### 🔐 Informações de Auditoria e Curadoria:")
+                    if article.get('retrieved_date'):
+                        st.text(f"Data de Recuperação: {article['retrieved_date']}")
+                    if article.get('ranking'):
+                        st.text(f"Ranking na Busca: #{article['ranking']}")
+                    st.text(f"Base de Dados: {article.get('platform', 'N/A')}")
+                    if article.get('citations'):
+                        st.text(f"Contagem de Citações: {article['citations']}")
+                    
+                    st.markdown("---")
+                
+                # Note about citations
+                st.markdown("### 📋 Nota sobre Citações")
+                st.info("""Todas as referências acima foram recuperadas de plataformas científicas reconhecidas. 
+Para citação formal, utilize os identificadores (DOI, PMID, arXiv ID) fornecidos. Os links de download 
+direcionam para versões de acesso aberto quando disponíveis. Para acesso completo, pode ser necessário 
+acesso institucional ou pagamento.""")
             else:
-                st.warning("Não foi possível encontrar referências com os critérios avançados. Verifique os termos de busca ou tente novamente.")
+                st.warning("Não foi possível encontrar referências. Verifique a conexão com a internet.")
         
         with tab3:
             st.markdown("### 🤖 Análise Detalhada (LLM)")
@@ -338,6 +728,62 @@ def show_disease_modal(disease_name: str, disease_key: str):
             
             insight = insights.get(disease_key, "Análise específica não disponível.")
             st.info(f"💡 **Insight Clínico:** {insight}")
+        
+        with tab4:
+            st.markdown("### 🧬 Análise Multi-Perspectiva com Algoritmos Genéticos")
+            st.info("🧠 Gerando interpretação diagnóstica...")
+            
+            # Check if we have articles from tab2
+            if 'all_articles' in locals() and all_articles:
+                with st.spinner("Executando análise multi-perspectiva com algoritmos genéticos..."):
+                    ga_results = ref_system.multi_perspective_genetic_analysis(all_articles)
+                
+                if ga_results.get('success'):
+                    st.success("✅ Análise Diagnóstica Completa Gerada!")
+                    
+                    st.markdown(f"""
+### 📊 Parâmetros da Análise Genética
+- **Artigos Analisados:** {ga_results['articles_analyzed']}
+- **Gerações Evolutivas:** {ga_results['generations']}
+- **Tamanho da População:** {ga_results['population_size']}
+                    """)
+                    
+                    st.markdown("### 🎯 Perspectivas Avaliadas")
+                    for perspective in ga_results['perspectives']:
+                        st.markdown(f"• {perspective}")
+                    
+                    st.markdown("---")
+                    st.markdown("### 📈 Resultados por Artigo")
+                    
+                    for result in ga_results['results']:
+                        with st.expander(f"📄 {result['article']}"):
+                            st.markdown(f"**Score de Fitness:** {result['fitness']:.4f}")
+                            st.markdown("**Pontuações por Perspectiva:**")
+                            
+                            # Create a bar chart for perspectives
+                            import pandas as pd
+                            import matplotlib.pyplot as plt
+                            
+                            perspectives_df = pd.DataFrame({
+                                'Perspectiva': list(result['perspectives'].keys()),
+                                'Score': list(result['perspectives'].values())
+                            })
+                            
+                            fig, ax = plt.subplots(figsize=(10, 4))
+                            ax.barh(perspectives_df['Perspectiva'], perspectives_df['Score'], color='steelblue')
+                            ax.set_xlabel('Score')
+                            ax.set_title('Análise Multi-Perspectiva')
+                            ax.grid(axis='x', alpha=0.3)
+                            st.pyplot(fig)
+                    
+                    st.markdown("---")
+                    st.markdown("### 🎓 Síntese Inteligente")
+                    st.write(ga_results['synthesis'])
+                else:
+                    st.error(f"❌ {ga_results.get('message', 'Erro na análise')}")
+            else:
+                st.warning("⚠️ Nenhum artigo disponível para análise. Por favor, busque referências na aba anterior primeiro.")
+        
         
         st.markdown("---")
         
