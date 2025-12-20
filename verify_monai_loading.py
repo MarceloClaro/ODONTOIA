@@ -69,8 +69,7 @@ def verify_monai_loading():
     print(f"\nDEBUG: Lendo dados de: TRAIN='{TRAIN_DIR}', VALID='{VALID_DIR}', TEST='{TEST_DIR}'")
     print(f"\nDEBUG: Classes encontradas ({len(classes)}): {classes}")
     print(f"\nDEBUG: Mapeamento de classes: {class_to_idx}")
-    print(f"\nDEBUG: Total de arquivos de treino: {len(train_files)}, "
-          f"Validação: {len(valid_files)}, Teste: {len(test_files)}")
+    print(f"\nDEBUG: Total de arquivos - Treino: {len(train_files)}, Validação: {len(valid_files)}, Teste: {len(test_files)}")
     
     # Verify sample
     train_loader = DataLoader(train_dataset, batch_size=1)

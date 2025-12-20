@@ -136,7 +136,7 @@ def run_training_pipeline(app_config):
         st.write(f"DEBUG: Lendo dados de: TRAIN='{config.TRAIN_DIR}', VALID='{config.VALID_DIR}', TEST='{config.TEST_DIR}'")
         st.write(f"DEBUG: Classes encontradas ({num_classes}): {classes}")
         st.write(f"DEBUG: Mapeamento de classes: {class_to_idx}")
-        st.write(f"DEBUG: Total de arquivos de treino: {len(train_files)}, Validação: {len(valid_files)}, Teste: {len(test_files)}")
+        st.write(f"DEBUG: Total de arquivos - Treino: {len(train_files)}, Validação: {len(valid_files)}, Teste: {len(test_files)}")
         # --- FIM DEBUG LOGS ---
 
         # Visualize a sample from the MONAI dataset
