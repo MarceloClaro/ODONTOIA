@@ -22,6 +22,42 @@ VALID_DIR = "dataset/Validation"
 TEST_DIR = "dataset/Testing"
 IMAGE_SIZE = 224
 
+# Valid image extensions
+VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+
+def select_rgb_channels(image):
+    """Select only the first 3 channels (RGB) from an image tensor."""
+    return image[:3, :, :] if image.shape[0] > 3 else image
+
+
+def discover_files(directory, classes, class_to_idx):
+    """
+    Discover image files in a directory organized by class folders.
+    
+    Args:
+        directory: Root directory path
+        classes: List of class names
+        class_to_idx: Dictionary mapping class names to indices
+    
+    Returns:
+        Tuple of (file_paths, labels)
+    """
+    files, labels = [], []
+    for target_class in classes:
+        class_dir = os.path.join(directory, target_class)
+        if not os.path.isdir(class_dir):
+            continue
+        
+        for fname in os.listdir(class_dir):
+            # Filter only valid image files
+            ext = os.path.splitext(fname)[1].lower()
+            if ext in VALID_IMAGE_EXTENSIONS:
+                files.append(os.path.join(class_dir, fname))
+                labels.append(class_to_idx[target_class])
+    
+    return files, labels
+
 def verify_monai_loading():
     """Verify MONAI dataset loading produces expected output."""
     
@@ -33,7 +69,7 @@ def verify_monai_loading():
     transform = Compose([
         LoadImaged(keys=["image"]),
         EnsureChannelFirstd(keys=["image"]),
-        Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+        Lambdad(keys="image", func=select_rgb_channels),
         ScaleIntensityd(keys=["image"]),
         Resized(keys=["image"], spatial_size=(IMAGE_SIZE, IMAGE_SIZE)),
         EnsureTyped(keys=["image"], dtype=torch.float32),
@@ -43,31 +79,10 @@ def verify_monai_loading():
     classes = sorted([d.name for d in os.scandir(TRAIN_DIR) if d.is_dir()])
     class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
     
-    # Training set
-    train_files, train_labels = [], []
-    for target_class in classes:
-        class_dir = os.path.join(TRAIN_DIR, target_class)
-        for fname in os.listdir(class_dir):
-            train_files.append(os.path.join(class_dir, fname))
-            train_labels.append(class_to_idx[target_class])
-    
-    # Validation set
-    valid_files, valid_labels = [], []
-    for target_class in classes:
-        class_dir = os.path.join(VALID_DIR, target_class)
-        if os.path.isdir(class_dir):
-            for fname in os.listdir(class_dir):
-                valid_files.append(os.path.join(class_dir, fname))
-                valid_labels.append(class_to_idx[target_class])
-    
-    # Test set
-    test_files, test_labels = [], []
-    for target_class in classes:
-        class_dir = os.path.join(TEST_DIR, target_class)
-        if os.path.isdir(class_dir):
-            for fname in os.listdir(class_dir):
-                test_files.append(os.path.join(class_dir, fname))
-                test_labels.append(class_to_idx[target_class])
+    # Discover files for each split
+    train_files, train_labels = discover_files(TRAIN_DIR, classes, class_to_idx)
+    valid_files, valid_labels = discover_files(VALID_DIR, classes, class_to_idx)
+    test_files, test_labels = discover_files(TEST_DIR, classes, class_to_idx)
     
     # Create MONAI Datasets
     train_data = [{"image": img, "label": lab} for img, lab in zip(train_files, train_labels)]

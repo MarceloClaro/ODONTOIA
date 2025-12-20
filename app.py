@@ -76,13 +76,20 @@ class CustomDataset(Dataset):
 def run_training_pipeline(app_config):
     """Main function to run the training and evaluation pipeline."""
     try:
+        # Valid image extensions
+        VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+        
+        def select_rgb_channels(image):
+            """Select only the first 3 channels (RGB) from an image tensor."""
+            return image[:3, :, :] if image.shape[0] > 3 else image
+        
         # --- MONAI Data Pipeline ---
         
         # Define transforms
         train_transforms_list = [
             LoadImaged(keys=["image"]),
             EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            Lambdad(keys="image", func=select_rgb_channels),
             ScaleIntensityd(keys=["image"]),
             Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
             EnsureTyped(keys=["image"], dtype=torch.float32),
@@ -101,7 +108,7 @@ def run_training_pipeline(app_config):
         val_transform = Compose([
             LoadImaged(keys=["image"]),
             EnsureChannelFirstd(keys=["image"]),
-            Lambdad(keys="image", func=lambda x: x[:3, :, :] if x.shape[0] > 3 else x),
+            Lambdad(keys="image", func=select_rgb_channels),
             ScaleIntensityd(keys=["image"]),
             Resized(keys=["image"], spatial_size=(config.TRAINING_PARAMS['image_size'], config.TRAINING_PARAMS['image_size'])),
             EnsureTyped(keys=["image"], dtype=torch.float32),
@@ -113,24 +120,33 @@ def run_training_pipeline(app_config):
         for target_class in classes:
             class_dir = os.path.join(config.TRAIN_DIR, target_class)
             for fname in os.listdir(class_dir):
-                train_files.append(os.path.join(class_dir, fname))
-                train_labels.append(class_to_idx[target_class])
+                # Filter only valid image files
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in VALID_IMAGE_EXTENSIONS:
+                    train_files.append(os.path.join(class_dir, fname))
+                    train_labels.append(class_to_idx[target_class])
 
         valid_files, valid_labels = [], []
         for target_class in classes:
             class_dir = os.path.join(config.VALID_DIR, target_class)
             if os.path.isdir(class_dir):
                 for fname in os.listdir(class_dir):
-                    valid_files.append(os.path.join(class_dir, fname))
-                    valid_labels.append(class_to_idx[target_class])
+                    # Filter only valid image files
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in VALID_IMAGE_EXTENSIONS:
+                        valid_files.append(os.path.join(class_dir, fname))
+                        valid_labels.append(class_to_idx[target_class])
 
         test_files, test_labels = [], []
         for target_class in classes:
             class_dir = os.path.join(config.TEST_DIR, target_class)
             if os.path.isdir(class_dir):
                 for fname in os.listdir(class_dir):
-                    test_files.append(os.path.join(class_dir, fname))
-                    test_labels.append(class_to_idx[target_class])
+                    # Filter only valid image files
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in VALID_IMAGE_EXTENSIONS:
+                        test_files.append(os.path.join(class_dir, fname))
+                        test_labels.append(class_to_idx[target_class])
 
         num_classes = len(classes)
 

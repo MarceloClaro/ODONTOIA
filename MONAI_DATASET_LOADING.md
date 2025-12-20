@@ -133,8 +133,8 @@ The MONAI datasets integrate seamlessly with the existing training pipeline in `
 
 ## Code Location
 
-- **Main Implementation**: `app.py` lines 79-164
-- **Configuration**: `config.py` lines 12-15 (dataset paths)
+- **Main Implementation**: `app.py` in the `run_training_pipeline` function
+- **Configuration**: `config.py` (dataset paths)
 - **Verification Script**: `verify_monai_loading.py`
 
 ## References
