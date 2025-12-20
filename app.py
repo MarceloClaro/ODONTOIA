@@ -49,7 +49,8 @@ import config
 from utils import (set_seed, seed_worker, visualize_data,
                    plot_class_distribution, plot_metrics, visualize_augmented_data,
                    display_model_architecture, display_environment_info, interpret_results,
-                   EnhancedImagePreprocessor, get_augmentation_transforms)
+                   EnhancedImagePreprocessor, get_augmentation_transforms,
+                   select_rgb_channels, discover_image_files, VALID_IMAGE_EXTENSIONS)
 from models import get_model
 from trainer import train_loop, compute_metrics, error_analysis, get_optimizer, get_scheduler
 from llm_modal import show_disease_modal, get_disease_key
@@ -76,13 +77,6 @@ class CustomDataset(Dataset):
 def run_training_pipeline(app_config):
     """Main function to run the training and evaluation pipeline."""
     try:
-        # Valid image extensions
-        VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
-        
-        def select_rgb_channels(image):
-            """Select only the first 3 channels (RGB) from an image tensor."""
-            return image[:3, :, :] if image.shape[0] > 3 else image
-        
         # --- MONAI Data Pipeline ---
         
         # Define transforms
@@ -115,38 +109,13 @@ def run_training_pipeline(app_config):
         ])
 
         # Discover classes and create file lists
-        train_files, train_labels, classes = [], [], sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
+        classes = sorted([d.name for d in os.scandir(config.TRAIN_DIR) if d.is_dir()])
         class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
-        for target_class in classes:
-            class_dir = os.path.join(config.TRAIN_DIR, target_class)
-            for fname in os.listdir(class_dir):
-                # Filter only valid image files
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in VALID_IMAGE_EXTENSIONS:
-                    train_files.append(os.path.join(class_dir, fname))
-                    train_labels.append(class_to_idx[target_class])
-
-        valid_files, valid_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.VALID_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    # Filter only valid image files
-                    ext = os.path.splitext(fname)[1].lower()
-                    if ext in VALID_IMAGE_EXTENSIONS:
-                        valid_files.append(os.path.join(class_dir, fname))
-                        valid_labels.append(class_to_idx[target_class])
-
-        test_files, test_labels = [], []
-        for target_class in classes:
-            class_dir = os.path.join(config.TEST_DIR, target_class)
-            if os.path.isdir(class_dir):
-                for fname in os.listdir(class_dir):
-                    # Filter only valid image files
-                    ext = os.path.splitext(fname)[1].lower()
-                    if ext in VALID_IMAGE_EXTENSIONS:
-                        test_files.append(os.path.join(class_dir, fname))
-                        test_labels.append(class_to_idx[target_class])
+        
+        # Discover files for each split using utility function
+        train_files, train_labels = discover_image_files(config.TRAIN_DIR, classes, class_to_idx)
+        valid_files, valid_labels = discover_image_files(config.VALID_DIR, classes, class_to_idx)
+        test_files, test_labels = discover_image_files(config.TEST_DIR, classes, class_to_idx)
 
         num_classes = len(classes)
 

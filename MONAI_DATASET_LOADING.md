@@ -124,17 +124,18 @@ This script will:
 
 ## Integration with Training Pipeline
 
-The MONAI datasets integrate seamlessly with the existing training pipeline in `app.py`:
+The MONAI datasets integrate seamlessly with the existing training pipeline:
 
-1. **Dataset Creation** (lines 79-144): MONAI datasets are created with transforms
-2. **DataLoader Creation** (lines 170-173): Standard PyTorch DataLoader wraps MONAI datasets
-3. **Training Loop** (trainer.py): Accesses data via dictionary keys (`batch['image']`, `batch['label']`)
+1. **Dataset Creation**: MONAI datasets are created with transforms in `run_training_pipeline()`
+2. **DataLoader Creation**: Standard PyTorch DataLoader wraps MONAI datasets
+3. **Training Loop**: Accesses data via dictionary keys (`batch['image']`, `batch['label']`)
 4. **Metrics Calculation**: Works with standard PyTorch tensor operations
 
 ## Code Location
 
-- **Main Implementation**: `app.py` in the `run_training_pipeline` function
-- **Configuration**: `config.py` (dataset paths)
+- **Main Implementation**: `app.py` in the `run_training_pipeline()` function
+- **Utility Functions**: `utils.py` - `select_rgb_channels()`, `discover_image_files()`
+- **Configuration**: `config.py` - dataset path constants (`TRAIN_DIR`, `VALID_DIR`, `TEST_DIR`)
 - **Verification Script**: `verify_monai_loading.py`
 
 ## References

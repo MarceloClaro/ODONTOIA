@@ -6,6 +6,7 @@ and produces the expected output format.
 """
 
 import os
+import sys
 import torch
 from monai.data.dataloader import DataLoader
 from monai.data.dataset import Dataset as MONAIDataset
@@ -15,48 +16,16 @@ from monai.transforms.utility.dictionary import EnsureChannelFirstd, EnsureTyped
 from monai.transforms.intensity.dictionary import ScaleIntensityd
 from monai.transforms.spatial.dictionary import Resized
 
+# Add parent directory to path to import utils
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import select_rgb_channels, discover_image_files, VALID_IMAGE_EXTENSIONS
+
 # Configuration
 DATASET_PATH = "dataset"
 TRAIN_DIR = "dataset/Training"
 VALID_DIR = "dataset/Validation"
 TEST_DIR = "dataset/Testing"
 IMAGE_SIZE = 224
-
-# Valid image extensions
-VALID_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
-
-
-def select_rgb_channels(image):
-    """Select only the first 3 channels (RGB) from an image tensor."""
-    return image[:3, :, :] if image.shape[0] > 3 else image
-
-
-def discover_files(directory, classes, class_to_idx):
-    """
-    Discover image files in a directory organized by class folders.
-    
-    Args:
-        directory: Root directory path
-        classes: List of class names
-        class_to_idx: Dictionary mapping class names to indices
-    
-    Returns:
-        Tuple of (file_paths, labels)
-    """
-    files, labels = [], []
-    for target_class in classes:
-        class_dir = os.path.join(directory, target_class)
-        if not os.path.isdir(class_dir):
-            continue
-        
-        for fname in os.listdir(class_dir):
-            # Filter only valid image files
-            ext = os.path.splitext(fname)[1].lower()
-            if ext in VALID_IMAGE_EXTENSIONS:
-                files.append(os.path.join(class_dir, fname))
-                labels.append(class_to_idx[target_class])
-    
-    return files, labels
 
 def verify_monai_loading():
     """Verify MONAI dataset loading produces expected output."""
@@ -79,10 +48,10 @@ def verify_monai_loading():
     classes = sorted([d.name for d in os.scandir(TRAIN_DIR) if d.is_dir()])
     class_to_idx = {cls_name: i for i, cls_name in enumerate(classes)}
     
-    # Discover files for each split
-    train_files, train_labels = discover_files(TRAIN_DIR, classes, class_to_idx)
-    valid_files, valid_labels = discover_files(VALID_DIR, classes, class_to_idx)
-    test_files, test_labels = discover_files(TEST_DIR, classes, class_to_idx)
+    # Discover files for each split using utility function
+    train_files, train_labels = discover_image_files(TRAIN_DIR, classes, class_to_idx)
+    valid_files, valid_labels = discover_image_files(VALID_DIR, classes, class_to_idx)
+    test_files, test_labels = discover_image_files(TEST_DIR, classes, class_to_idx)
     
     # Create MONAI Datasets
     train_data = [{"image": img, "label": lab} for img, lab in zip(train_files, train_labels)]
