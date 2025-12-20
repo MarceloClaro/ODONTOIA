@@ -18,7 +18,7 @@ from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.decomposition import PCA
 import streamlit as st
 import gc
-from torchcam.methods import SmoothGradCAMpp, ScoreCAM, LayerCAM
+from torchcam.methods import SmoothGradCAMpp, LayerCAM, GradCAM, GradCAMpp
 from torchvision.transforms.functional import to_pil_image
 import cv2
 from typing import List, Tuple, Optional, Any, cast
@@ -48,7 +48,8 @@ from monai.transforms.post.array import Activations, AsDiscrete
 import config
 from utils import (set_seed, seed_worker, visualize_data,
                    plot_class_distribution, plot_metrics, visualize_augmented_data,
-                   display_model_architecture, display_environment_info, interpret_results)
+                   display_model_architecture, display_environment_info, interpret_results,
+                   EnhancedImagePreprocessor, get_augmentation_transforms)
 from models import get_model
 from trainer import train_loop, compute_metrics, error_analysis, get_optimizer, get_scheduler
 from llm_modal import show_disease_modal, get_disease_key
@@ -199,7 +200,8 @@ def run_training_pipeline(app_config):
 
     # --- Training ---
     train_results = train_loop(model, train_loader, valid_loader, criterion, optimizer, scheduler, 
-                                app_config['epochs'], app_config['patience'], app_config['augmentation'])
+                                app_config['epochs'], app_config['patience'], 
+                                app_config['augmentation'], app_config['l1_lambda'])
     
     best_model_wts = train_results['weights']
     history = train_results['history']
@@ -333,8 +335,9 @@ def visualize_activations(model: nn.Module, image: Image.Image, xai_method: str)
     cam_extractor = None
     try:
         cam_extractor_class = {
+            'GradCAM': GradCAM,
+            'GradCAMpp': GradCAMpp,
             'SmoothGradCAMpp': SmoothGradCAMpp,
-            'ScoreCAM': ScoreCAM,
             'LayerCAM': LayerCAM
         }.get(xai_method)
 
@@ -406,6 +409,8 @@ def main():
         
         st.header("Regularização")
         l2_lambda = st.number_input("Regularização L2 (Weight Decay):", 0.0, 0.1, config.TRAINING_PARAMS['l2_lambda'], 0.001, key="l2")
+        l1_lambda = st.number_input("Regularização L1:", 0.0, 0.01, 0.0, 0.0001, key="l1", 
+                                    help="Regularização L1 para esparsidade nos pesos do modelo")
         patience = st.number_input("Paciência (Early Stopping):", 1, 20, config.TRAINING_PARAMS['patience'], key="patience")
         use_weighted_loss = st.checkbox("Usar Perda Ponderada", config.REGULARIZATION_PARAMS['use_weighted_loss'], key="weighted_loss")
         
@@ -426,9 +431,9 @@ def main():
             app_config = {
                 'model_name': model_name, 'fine_tune': fine_tune, 'epochs': epochs,
                 'batch_size': batch_size, 'optimizer': optimizer, 'learning_rate': learning_rate,
-                'scheduler': scheduler, 'l2_lambda': l2_lambda, 'patience': patience,
-                'use_weighted_loss': use_weighted_loss, 'augmentation': augmentation,
-                'train_split': config.TRAINING_PARAMS['train_split']
+                'scheduler': scheduler, 'l2_lambda': l2_lambda, 'l1_lambda': l1_lambda, 
+                'patience': patience, 'use_weighted_loss': use_weighted_loss, 
+                'augmentation': augmentation, 'train_split': config.TRAINING_PARAMS['train_split']
             }
             
             data_dir = None

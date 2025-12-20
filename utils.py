@@ -9,12 +9,14 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from typing import List, Dict, Any, cast
+from typing import List, Dict, Any, cast, Optional
 from torchvision.datasets import ImageFolder
 from matplotlib.patches import Rectangle
 from typing import cast
 import torchvision
 from torch.utils.data import DataLoader
+from torchvision import transforms
+from PIL import Image, ImageEnhance
 
 def set_seed(seed: int):
     """Set seed for reproducibility."""
@@ -289,3 +291,143 @@ def plot_interactive_embeddings(features: np.ndarray, labels: np.ndarray, image_
     # No entanto, vamos tentar uma abordagem mais visual.
     
     st.plotly_chart(fig, use_container_width=True)
+
+class EnhancedImagePreprocessor:
+    """
+    Enhanced image preprocessing class with advanced techniques for medical imaging.
+    Provides better image quality and normalization for dental image analysis.
+    """
+    
+    def __init__(self, image_size: int = 224, apply_clahe: bool = True, 
+                 apply_noise_reduction: bool = True):
+        """
+        Initialize the enhanced image preprocessor.
+        
+        Args:
+            image_size: Target size for the images
+            apply_clahe: Whether to apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            apply_noise_reduction: Whether to apply noise reduction
+        """
+        self.image_size = image_size
+        self.apply_clahe = apply_clahe
+        self.apply_noise_reduction = apply_noise_reduction
+    
+    def preprocess(self, image: Image.Image) -> Image.Image:
+        """
+        Apply enhanced preprocessing to an image.
+        
+        Args:
+            image: PIL Image to preprocess
+            
+        Returns:
+            Preprocessed PIL Image
+        """
+        import cv2
+        
+        # Convert to numpy array
+        img_array = np.array(image)
+        
+        # Apply CLAHE for better contrast
+        if self.apply_clahe and len(img_array.shape) == 3:
+            # Convert to LAB color space
+            lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # Apply CLAHE to L channel
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            
+            # Merge channels
+            lab = cv2.merge([l, a, b])
+            img_array = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        
+        # Apply noise reduction
+        if self.apply_noise_reduction:
+            img_array = cv2.fastNlMeansDenoisingColored(img_array, None, 10, 10, 7, 21)
+        
+        # Convert back to PIL Image
+        return Image.fromarray(img_array)
+    
+    def get_transforms(self, is_training: bool = True) -> transforms.Compose:
+        """
+        Get the transforms pipeline for training or validation.
+        
+        Args:
+            is_training: Whether to include augmentation transforms
+            
+        Returns:
+            Composed transforms
+        """
+        if is_training:
+            return transforms.Compose([
+                transforms.Lambda(lambda x: self.preprocess(x)),
+                transforms.Resize((self.image_size, self.image_size)),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(15),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            return transforms.Compose([
+                transforms.Lambda(lambda x: self.preprocess(x)),
+                transforms.Resize((self.image_size, self.image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+def get_augmentation_transforms(augmentation_type: str = 'Nenhum', 
+                               image_size: int = 224) -> transforms.Compose:
+    """
+    Get augmentation transforms based on the selected strategy.
+    
+    Args:
+        augmentation_type: Type of augmentation ('Nenhum', 'Padrão', 'Mixup', 'Cutmix')
+        image_size: Target image size
+        
+    Returns:
+        Composed transforms
+        
+    Note:
+        Mixup and Cutmix are applied in the training loop, not in transforms.
+        This function returns the base transforms for each strategy.
+    """
+    if augmentation_type == 'Nenhum':
+        # No augmentation, just basic preprocessing
+        return transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+    
+    elif augmentation_type == 'Padrão':
+        # Standard augmentation with flips, rotations, color jitter
+        return transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.3),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            transforms.RandomAffine(degrees=0, shear=10, scale=(0.8, 1.2)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+    
+    elif augmentation_type in ['Mixup', 'Cutmix']:
+        # For Mixup and Cutmix, we use standard augmentation + mixing in training loop
+        return transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomRotation(10),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+    
+    else:
+        # Default to no augmentation
+        return transforms.Compose([
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])

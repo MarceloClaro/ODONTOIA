@@ -84,4 +84,4 @@ REGULARIZATION_PARAMS = {
 # -------------------
 # XAI (Explainable AI)
 # -------------------
-AVAILABLE_XAI_METHODS = ['SmoothGradCAMpp', 'ScoreCAM', 'LayerCAM']
+AVAILABLE_XAI_METHODS = ['GradCAM', 'GradCAMpp', 'SmoothGradCAMpp', 'LayerCAM']
