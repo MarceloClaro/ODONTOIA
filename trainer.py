@@ -15,10 +15,14 @@ import streamlit as st
 
 # Import optional optimizers
 try:
-    from torch_optimizer import Ranger
+    from ranger import Ranger
     RANGER_AVAILABLE = True
 except ImportError:
-    RANGER_AVAILABLE = False
+    try:
+        from pytorch_ranger.ranger import Ranger
+        RANGER_AVAILABLE = True
+    except ImportError:
+        RANGER_AVAILABLE = False
     
 try:
     from lion_pytorch import Lion
