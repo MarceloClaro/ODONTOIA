@@ -62,7 +62,7 @@ def discover_image_files(directory: str, classes: List[str], class_to_idx: Dict[
                     files.append(os.path.join(class_dir, fname))
                     labels.append(class_to_idx[target_class])
         except PermissionError:
-            st.warning(f"Permission denied accessing directory: {class_dir}")
+            print(f"Warning: Permission denied accessing directory: {class_dir}")
             continue
     
     return files, labels

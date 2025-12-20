@@ -18,7 +18,7 @@ from monai.transforms.spatial.dictionary import Resized
 
 # Add parent directory to path to import utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import select_rgb_channels, discover_image_files, VALID_IMAGE_EXTENSIONS
+from utils import select_rgb_channels, discover_image_files
 
 # Configuration
 DATASET_PATH = "dataset"
